@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convenience entry: run single demo from project root."""
+"""Convenience entry: run single-field RB-CCP demo."""
 
 import sys
 from pathlib import Path

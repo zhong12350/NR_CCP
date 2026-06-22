@@ -1,0 +1,64 @@
+# NR-CCP 完整版配置（Fields2Benchmark 350 田）
+
+seed: 42
+
+field:
+  wkt_path: wkt/ee_field_10.wkt
+  auto_cell_size: true
+
+headland:
+  width_m: 18.0
+
+risk_field:
+  headland_base: 1.0
+  inner_base: 0.08
+  headland_decay_m: 6.0
+  auto_hotspots: true
+  auto_hotspot_count: 2
+  use_pass_count: true
+  pass_count_weight: 0.25
+  pass_count_angles: [0, 45, 90, 135]
+  repeat_penalty: 0.35
+  turning_penalty: 0.25
+  turning_angle_deg: 45.0
+  normalize: true
+
+planner:
+  swath_width_m: 6.0
+  angle_step_deg: 5.0
+  min_coverage: 0.80
+  waypoint_spacing_m: 2.0
+
+selection:
+  delta: 0.38
+  lambda_weighted: 0.8
+  beta_rb_ccp: 1.0
+  beta_nr_ccp: 1.0
+
+informed_sampling:
+  enabled: true
+  coarse_step_deg: 15.0
+  fine_step_deg: 2.0
+  top_k_coarse: 6
+  include_principal_axes: true
+  learned_weight: 0.35
+  model_path: models/informed_sampler.npz
+
+methods:
+  - naive
+  - weighted
+  - rb_ccp
+  - nr_ccp
+  - fields2cover
+
+batch:
+  field_glob: wkt/*.wkt
+  max_fields: 350
+  save_figures: false
+  progress_every: 25
+
+output:
+  figures_dir: outputs/figures
+  results_dir: outputs/results
+  advisor_demo_dir: outputs/advisor_demo
+  dpi: 150
