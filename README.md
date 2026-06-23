@@ -1,43 +1,38 @@
 # NR-CCP
 
-Neural Risk-Aware Coverage Path Planning (NR-CCP) is a lightweight Python prototype for risk-aware agricultural coverage path planning.
+**Neural Risk-Aware Coverage Path Planning for agricultural robots.**
 
-The project evaluates coverage routes on 2D field boundaries from WKT files. It builds a compaction risk field, generates coverage path candidates, and compares several planning/selection strategies under path length, risk, coverage, and risk-bound violation metrics.
+NR-CCP turns real field boundaries into coverage routes that know where the soil is fragile. It builds a 2D planning grid from WKT field polygons, estimates compaction risk from headlands, repeated passes, turns, vehicle load, tire pressure, and soil moisture, then compares route-selection strategies with reproducible figures and CSV metrics.
 
-> This repository is a research demo/prototype, not a full production implementation of NR-RRT or Fields2Cover.
+> This repository is a compact research prototype. It is designed for fast experiments, visual debugging, and paper-style comparisons, not as a production-grade replacement for NR-RRT or Fields2Cover.
 
-## Features
+## What You See
 
-- Load real field boundaries from WKT files.
-- Generate headland-aware 2D field grids.
-- Build synthetic soil compaction risk fields from headland distance, pass-count effects, repeated traversal penalties, and turning penalties.
-- Compare multiple coverage planning baselines:
-  - `naive`
-  - `weighted`
-  - `rb_ccp`
-  - `nr_ccp`
-  - `fields2cover`
-- Run single-field demos, batch experiments, ablation studies, delta sweeps, and informed sampler training.
-- Export figures and CSV metrics for later analysis.
+<table>
+  <tr>
+    <td width="33%"><img src="docs/assets/field_input.png" alt="Real field boundary on satellite imagery"></td>
+    <td width="33%"><img src="docs/assets/risk_aware_path.png" alt="Risk field with selected coverage path"></td>
+    <td width="33%"><img src="docs/assets/method_comparison.png" alt="Method comparison chart"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>1. Real field input</b><br>WKT boundaries from field datasets.</td>
+    <td align="center"><b>2. Risk-aware route</b><br>Heatmap + headland + selected coverage path.</td>
+    <td align="center"><b>3. Quantified tradeoff</b><br>Length, compaction cost, and risk-bound diagnostics.</td>
+  </tr>
+</table>
 
-## Repository Structure
+In one run, the project answers the practical planning question:
 
-```text
-NR_CCP/
-  configs/                 # Experiment configuration files
-  data/                    # Small demo field data
-  imgs/                    # Field preview images
-  models/                  # Placeholder for trained sampler weights
-  scripts/                 # Convenience experiment scripts
-  src/                     # Core planning, risk, metrics, and visualization code
-  wkt/                     # Field boundary WKT files
-  main.py                  # Main entry point
-  requirements.txt         # Python dependencies
-```
+> If a robot must cover this field, which route keeps the path short while avoiding high compaction risk?
 
-Generated experiment results are written to `outputs/`, which is intentionally ignored by Git.
+## Core Ideas
 
-## Installation
+- **Coverage first:** generate swath-based boustrophedon candidates over real 2D field polygons.
+- **Risk model:** combine headland exposure, synthetic hotspots, historical/pass-count effects, repeated traversal, turn penalties, and physics-informed compaction multipliers.
+- **Risk-bounded selection:** compare shortest-path, weighted-cost, RB-CCP, NR-CCP informed search, and Fields2Cover-like baselines under the same metrics.
+- **Reproducible outputs:** every run writes path figures, comparison plots, and per-method CSV rows for later analysis.
+
+## Quick Start
 
 ```bash
 git clone https://github.com/zhong12350/NR_CCP.git
@@ -46,120 +41,113 @@ cd NR_CCP
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+python main.py configs/default.yaml wkt/ee_field_105.wkt
 ```
 
-Dependencies:
-
-- NumPy
-- Matplotlib
-- PyYAML
-- Shapely
-
-## Quick Start
-
-Run the default single-field experiment:
+If Matplotlib tries to open a GUI backend on a headless machine, run:
 
 ```bash
+MPLBACKEND=Agg python main.py configs/default.yaml wkt/ee_field_105.wkt
+```
+
+Outputs are written to `outputs/`:
+
+```text
+outputs/
+  figures/                 # Risk heatmaps, selected paths, comparison plots
+  results/                 # Per-field and batch CSV metrics
+  advisor_demo/            # Demo-ready planning figures
+```
+
+## Run More Experiments
+
+```bash
+# Full default single-field run
 python main.py
-```
 
-Run a specific WKT field:
-
-```bash
+# Run a specific field polygon
 python main.py wkt/ee_field_10.wkt
-```
 
-Run the convenience demo script:
-
-```bash
-python scripts/run_demo.py
-```
-
-## Experiment Modes
-
-```bash
-# Run batch experiments over WKT fields
+# Batch evaluation over WKT fields
 python main.py batch
 
-# Generate advisor demo figures
-python main.py advisor
-
-# Analyze batch results and generate summary plots
+# Analyze batch CSVs and generate summary plots
 python main.py analyze
 
-# Run delta sensitivity experiments
+# Risk-bound sensitivity
 python main.py delta_sweep
 
-# Run ablation experiments
+# Component ablation
 python main.py ablation
+
+# Candidate-budget experiment
+python main.py budget_experiment
+
+# Vehicle/soil physics sensitivity
+python main.py physics_sensitivity
 
 # Train the informed sampler
 python main.py train_sampler
 ```
 
-The default full experiment configuration is:
+The larger experiment setup lives in `configs/nr_ccp_full.yaml`. For a smaller demo run, use `configs/default.yaml`.
 
-```text
-configs/nr_ccp_full.yaml
-```
+## Compared Methods
 
-You can also pass a custom YAML configuration:
-
-```bash
-python main.py configs/default.yaml
-```
-
-## Methods
-
-The current implementation compares candidate selection rules on shared or informed candidate pools:
-
-| Method | Description |
+| Method | What it does |
 | --- | --- |
-| `naive` | Selects the shortest feasible coverage path. |
+| `naive` | Selects the shortest available coverage candidate. |
 | `weighted` | Minimizes path length plus weighted compaction cost. |
-| `rb_ccp` | Risk-bounded coverage path planning on the full candidate pool. |
-| `nr_ccp` | Applies the risk-bounded rule on an informed-search candidate pool. |
-| `fields2cover` | Fields2Cover-like shortest-route baseline on the shared candidate pool. |
+| `rb_ccp` | Applies risk-bounded coverage-path selection over the full candidate pool. |
+| `nr_ccp` | Applies the risk-bounded rule on an informed candidate pool. |
+| `fields2cover` | Uses official/imported Fields2Cover records when available, with a heuristic fallback. |
 
-## Outputs
+## Metrics
 
-By default, results are saved under:
+| Metric | Meaning |
+| --- | --- |
+| `path_length_m` | Total route length. |
+| `compaction_cost` | Accumulated risk-weighted traversal cost. |
+| `mean_risk`, `max_risk` | Average and peak planning risk along the selected path. |
+| `coverage_rate` | Fraction of workable area covered by the route. |
+| `fallback` | Whether the configured risk bound could not be satisfied. |
+| `violation` | How far the selected route exceeds the risk bound. |
+| `physics_factor` | Combined multiplier from load, pressure, and soil moisture. |
+
+## Repository Map
 
 ```text
-outputs/
-  figures/                 # Path visualizations and comparison plots
-  results/                 # Per-field and batch CSV metrics
-  advisor_demo/            # Advisor demo figures
+NR_CCP/
+  configs/                 # YAML experiment configurations
+  docs/assets/             # README figures
+  imgs/                    # Field preview images
+  models/                  # Optional trained sampler weights
+  notes/                   # Demo notes and presentation material
+  scripts/                 # Experiment and analysis entry points
+  src/                     # Planning, risk, metrics, physics, visualization
+  wkt/                     # Field boundary polygons
+  main.py                  # Main CLI entry point
+  requirements.txt         # Python dependencies
 ```
 
-Important metrics include:
+## Configuration Highlights
 
-- `path_length_m`: total path length.
-- `compaction_cost`: accumulated risk-weighted traversal cost.
-- `mean_risk`: mean risk along the selected path.
-- `max_risk`: maximum risk along the selected path.
-- `coverage_rate`: covered free-space ratio.
-- `fallback`: whether the risk bound could not be satisfied.
-- `violation`: amount by which the selected path exceeds the risk bound.
+Most behavior is controlled by YAML:
 
-## Configuration
-
-Most experiment settings are controlled by YAML files in `configs/`.
-
-Common parameters:
-
-- `field.wkt_path`: default field boundary file.
-- `headland.width_m`: headland width.
-- `risk_field`: risk model and penalty settings.
-- `planner.swath_width_m`: coverage swath width.
-- `planner.angle_step_deg`: candidate angle enumeration resolution.
-- `selection.delta`: risk bound.
-- `methods`: list of methods to compare.
-- `batch.field_glob`: WKT files used in batch mode.
+- `field.wkt_path`: default field polygon.
+- `headland.width_m`: headland buffer width.
+- `risk_field`: headland, hotspot, pass-count, repeat, and turn penalties.
+- `vehicle`, `soil`, `physics`: compaction multipliers from wheel load, contact pressure, and moisture.
+- `planner.swath_width_m`: coverage swath spacing.
+- `planner.angle_step_deg`: candidate angle resolution.
+- `selection.delta`: mean-risk bound.
+- `methods`: methods included in a run.
+- `batch.field_glob`: WKT files used for batch evaluation.
 
 ## Notes
 
-- This is a compact research prototype for exploring risk-aware coverage path planning ideas.
-- The included WKT and image files are used for reproducible demos and batch experiments.
-- Trained model weights such as `models/*.npz` are ignored by Git and should be regenerated or shared separately if needed.
+- `outputs/` is intentionally ignored by Git because figures and CSVs are regenerated from configs.
+- `models/*.npz` is ignored; retrain or share sampler weights separately when needed.
+- The included README figures were generated from the lightweight default demo and are meant to show the workflow, not claim final benchmark performance.
 
