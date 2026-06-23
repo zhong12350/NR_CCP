@@ -70,6 +70,29 @@ def _pick_writer(out_path: Path, fps: int):
     return PillowWriter(fps=fps)
 
 
+def _count_gif_frames(path: Path) -> int | None:
+    """Return GIF frame count when Pillow is available."""
+    if path.suffix.lower() != ".gif":
+        return None
+    try:
+        from PIL import Image, ImageSequence
+
+        with Image.open(path) as im:
+            return sum(1 for _ in ImageSequence.Iterator(im))
+    except Exception:
+        return None
+
+
+def _report_saved_animation(path: Path) -> None:
+    frames = _count_gif_frames(path)
+    if frames is not None:
+        print(f"  verified GIF frames: {frames}")
+        if frames <= 1:
+            raise RuntimeError(
+                f"{path} contains only one GIF frame. The animation export failed."
+            )
+
+
 def animate_coverage_simulation(
     grid: FieldGrid,
     risk: RiskField,
@@ -295,13 +318,18 @@ def animate_coverage_simulation(
         artists = [trail_lc, body_patch, swath_patch, heading_arrow, glow, hud_text, progress_fill, risk_bar]
         return artists
 
+    def init():
+        return update(0)
+
     anim = FuncAnimation(
         fig,
         update,
         frames=len(frame_states),
+        init_func=init,
         interval=1000 / fps,
         blit=False,
         repeat=True,
+        cache_frame_data=False,
     )
 
     writer = _pick_writer(out_path, fps)
@@ -312,11 +340,13 @@ def animate_coverage_simulation(
     writer = writer or PillowWriter(fps=fps)
     print(f"  rendering {len(frame_states)} frames → {saved_path.name} ({fps} fps)...")
     anim.save(str(saved_path), writer=writer, dpi=dpi)
+    _report_saved_animation(saved_path)
     plt.close(fig)
 
     if saved_path.suffix.lower() == ".mp4" and saved_path.stat().st_size < 1024:
         gif_path = saved_path.with_suffix(".gif")
         anim.save(str(gif_path), writer=PillowWriter(fps=fps), dpi=dpi)
+        _report_saved_animation(gif_path)
         saved_path = gif_path
 
     return saved_path
@@ -387,12 +417,21 @@ def animate_method_comparison(
             out.extend([trail, body])
         return out
 
-    anim = FuncAnimation(fig, update, frames=n_frames, interval=1000 / fps, blit=False)
+    anim = FuncAnimation(
+        fig,
+        update,
+        frames=n_frames,
+        init_func=lambda: update(0),
+        interval=1000 / fps,
+        blit=False,
+        cache_frame_data=False,
+    )
     writer = _pick_writer(out_path, fps) or PillowWriter(fps=fps)
     saved = out_path if _pick_writer(out_path, fps) else out_path.with_suffix(".gif")
     if saved.suffix == ".mp4" and not shutil.which("ffmpeg"):
         saved = out_path.with_suffix(".gif")
         writer = PillowWriter(fps=fps)
     anim.save(str(saved), writer=writer, dpi=dpi)
+    _report_saved_animation(saved)
     plt.close(fig)
     return saved
