@@ -251,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
             "import_f2c",
             "budget_experiment",
             "physics_sensitivity",
+            "simulate",
         ):
             mode = argv[0]
             argv = argv[1:]
@@ -304,6 +305,10 @@ def main(argv: list[str] | None = None) -> int:
         from scripts.run_physics_sensitivity import run_physics_sensitivity
 
         return run_physics_sensitivity(config, root)
+    elif mode == "simulate":
+        from scripts.run_simulation import main as run_simulation_main
+
+        return run_simulation_main(argv)
     else:
         wkt = Path(argv[0]) if argv else None
         run_single_field(config, root, wkt_path=wkt)
