@@ -34,6 +34,11 @@ def _coerce_batch_rows(rows: list[dict]) -> list[dict]:
                 "coverage_rate": float(r["coverage_rate"]),
                 "fallback": r["fallback"].lower() in ("true", "1"),
                 "violation": float(r["violation"]),
+                "headland_cost": float(r.get("headland_cost", 0)),
+                "hotspot_cost": float(r.get("hotspot_cost", 0)),
+                "pass_count_cost": float(r.get("pass_count_cost", 0)),
+                "repeat_cost": float(r.get("repeat_cost", 0)),
+                "turn_cost": float(r.get("turn_cost", 0)),
             }
         )
     return out

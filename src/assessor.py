@@ -26,10 +26,31 @@ class PathAssessment:
     objective_length: float
     objective_weighted: float
     objective_rb: float
+    headland_cost: float = 0.0
+    hotspot_cost: float = 0.0
+    pass_count_cost: float = 0.0
+    repeat_cost: float = 0.0
+    turn_cost: float = 0.0
 
     @property
     def angle_deg(self) -> float:
         return self.candidate.angle_deg
+
+
+@dataclass(frozen=True)
+class FeasibilityCertificate:
+    """Fallback / feasibility diagnostics for one field."""
+
+    field_name: str
+    delta: float
+    num_full_candidates: int
+    num_nr_candidates: int
+    best_coverage: float
+    min_mean_risk: float
+    min_violation: float
+    field_area_m2: float
+    aspect_ratio: float
+    boundary_complexity: float
 
 
 def path_length(waypoints: list[tuple[float, float]]) -> float:
@@ -45,7 +66,6 @@ def _densify_waypoints(
     waypoints: list[tuple[float, float]],
     spacing_m: float,
 ) -> list[tuple[float, float]]:
-    """Insert points along segments for smoother risk integration."""
     if len(waypoints) < 2:
         return waypoints
     dense: list[tuple[float, float]] = [waypoints[0]]
@@ -61,7 +81,6 @@ def _densify_waypoints(
 def _count_turns(waypoints: list[tuple[float, float]], angle_threshold_deg: float) -> int:
     if len(waypoints) < 3:
         return 0
-    threshold = np.deg2rad(angle_threshold_deg)
     turns = 0
     prev_dir: tuple[float, float] | None = None
     for (x0, y0), (x1, y1) in zip(waypoints[:-1], waypoints[1:]):
@@ -80,7 +99,6 @@ def compute_coverage_rate(
     grid: FieldGrid,
     tool_radius_m: float,
 ) -> float:
-    """Fraction of inner workable cells covered within tool radius."""
     if not waypoints:
         return 0.0
 
@@ -107,12 +125,7 @@ def assess_candidate(
     lambda_weighted: float,
     beta_rb: float,
 ) -> PathAssessment:
-    """
-    Risk Assessor: compute L, C, mean_risk, max_risk, coverage.
-
-    Dynamic repeat traversal and turning penalties are applied during
-    segment-wise risk integration (planning proxy, not physical model).
-    """
+    """Risk Assessor with decomposed compaction components."""
     waypoints = _densify_waypoints(candidate.waypoints, planner_cfg.waypoint_spacing_m / 2)
     L = path_length(candidate.waypoints)
 
@@ -120,6 +133,10 @@ def assess_candidate(
     static_samples: list[float] = []
     static_weights: list[float] = []
     compaction = 0.0
+    headland_cost = 0.0
+    hotspot_cost = 0.0
+    pass_count_cost = 0.0
+    repeat_cost = 0.0
 
     for (x0, y0), (x1, y1) in zip(waypoints[:-1], waypoints[1:]):
         seg_len = abs(x1 - x0) + abs(y1 - y0)
@@ -129,6 +146,9 @@ def assess_candidate(
         xs = np.linspace(x0, x1, n)
         ys = np.linspace(y0, y1, n)
         base_r = risk.sample_many(xs, ys, grid)
+        head_r = risk.sample_layer_many(risk.headland_layer, xs, ys, grid)
+        hot_r = risk.sample_layer_many(risk.hotspot_layer, xs, ys, grid)
+        pass_r = risk.sample_layer_many(risk.pass_count_layer, xs, ys, grid)
 
         for i in range(len(xs)):
             static_samples.append(float(base_r[i]))
@@ -138,13 +158,18 @@ def assess_candidate(
         for i in range(len(xs)):
             ix, iy = grid.world_to_index(float(xs[i]), float(ys[i]))
             repeat_factor = 1.0 + risk_cfg.repeat_penalty * visit_count[iy, ix]
+            added_repeat = max(0.0, dynamic_r[i] * (repeat_factor - 1.0))
             dynamic_r[i] = min(1.0, dynamic_r[i] * repeat_factor)
+            repeat_cost += (seg_len / n) * added_repeat
             visit_count[iy, ix] += 1
 
-        seg_dynamic = float(dynamic_r.mean())
-        compaction += seg_len * seg_dynamic
+        compaction += seg_len * float(dynamic_r.mean())
+        headland_cost += seg_len * float(head_r.mean())
+        hotspot_cost += seg_len * float(hot_r.mean())
+        pass_count_cost += seg_len * float(pass_r.mean())
 
     num_turns = _count_turns(candidate.waypoints, risk_cfg.turning_angle_deg)
+    turn_cost = 0.0
     if num_turns > 0:
         turn_cost = num_turns * risk_cfg.turning_penalty * (compaction / max(L, 1.0))
         compaction += turn_cost
@@ -172,6 +197,11 @@ def assess_candidate(
         objective_length=L,
         objective_weighted=L + lambda_weighted * compaction,
         objective_rb=L + beta_rb * compaction,
+        headland_cost=headland_cost,
+        hotspot_cost=hotspot_cost,
+        pass_count_cost=pass_count_cost,
+        repeat_cost=repeat_cost,
+        turn_cost=turn_cost,
     )
 
 
@@ -185,7 +215,6 @@ def assess_all_candidates(
     beta_rb: float,
     min_coverage: float,
 ) -> list[PathAssessment]:
-    """Assess candidates; adapt coverage threshold for small/irregular fields."""
     if not candidates:
         return []
 
@@ -200,4 +229,45 @@ def assess_all_candidates(
     if best_cov < min_coverage - 1e-6:
         threshold = max(0.75, best_cov - 0.02)
 
-    return [a for a in all_assessed if a.coverage_rate >= threshold - 1e-6]
+    filtered = [a for a in all_assessed if a.coverage_rate >= threshold - 1e-6]
+    if not filtered:
+        best_cov = max(a.coverage_rate for a in all_assessed)
+        filtered = [a for a in all_assessed if a.coverage_rate >= best_cov - 1e-6]
+    return filtered
+
+
+def build_feasibility_certificate(
+    field_name: str,
+    grid: FieldGrid,
+    full_assessments: list[PathAssessment],
+    nr_assessments: list[PathAssessment],
+    delta: float,
+) -> FeasibilityCertificate:
+    pool = full_assessments or nr_assessments
+    if not pool:
+        return FeasibilityCertificate(
+            field_name=field_name,
+            delta=delta,
+            num_full_candidates=0,
+            num_nr_candidates=len(nr_assessments),
+            best_coverage=0.0,
+            min_mean_risk=1.0,
+            min_violation=1.0,
+            field_area_m2=grid.geometry.area_m2,
+            aspect_ratio=grid.geometry.aspect_ratio,
+            boundary_complexity=float(grid.geometry.outer.length / max(grid.geometry.area_m2, 1.0)),
+        )
+
+    min_risk = min(a.mean_risk for a in pool)
+    return FeasibilityCertificate(
+        field_name=field_name,
+        delta=delta,
+        num_full_candidates=len(full_assessments),
+        num_nr_candidates=len(nr_assessments),
+        best_coverage=max(a.coverage_rate for a in pool),
+        min_mean_risk=min_risk,
+        min_violation=max(0.0, min_risk - delta),
+        field_area_m2=grid.geometry.area_m2,
+        aspect_ratio=grid.geometry.aspect_ratio,
+        boundary_complexity=float(grid.geometry.outer.length / max(grid.geometry.area_m2, 1.0)),
+    )

@@ -244,40 +244,187 @@ def plot_delta_violation(
 
 
 def plot_delta_sweep(rows: list[dict], out_path: Path, dpi: int = 150) -> None:
-    """Δ vs fallback rate and mean path length."""
+    """Δ vs fallback rate, path length, and mean risk."""
     if not rows:
         return
     deltas = sorted(set(float(r["delta"]) for r in rows))
     methods = sorted(set(r["method"] for r in rows))
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
 
     for method in methods:
         fb_rates = []
         lengths = []
+        risks = []
         for d in deltas:
             subset = [r for r in rows if r["method"] == method and float(r["delta"]) == d]
             if not subset:
                 fb_rates.append(0.0)
                 lengths.append(0.0)
+                risks.append(0.0)
                 continue
-            fb_rates.append(sum(1 for r in subset if r["fallback"]) / len(subset))
+            fb = [r["fallback"] if isinstance(r["fallback"], bool) else str(r["fallback"]).lower() in ("true", "1") for r in subset]
+            fb_rates.append(sum(fb) / len(subset))
             lengths.append(sum(float(r["path_length_m"]) for r in subset) / len(subset))
+            risks.append(sum(float(r["mean_risk"]) for r in subset) / len(subset))
         axes[0].plot(deltas, fb_rates, marker="o", label=_label(method))
         axes[1].plot(deltas, lengths, marker="o", label=_label(method))
+        axes[2].plot(deltas, risks, marker="o", label=_label(method))
 
     axes[0].set_xlabel("Δ")
     axes[0].set_ylabel("Fallback rate")
-    axes[0].set_title("Δ vs violation / fallback")
-    axes[0].legend(fontsize=8)
+    axes[0].set_title("Δ vs fallback")
+    axes[0].legend(fontsize=7)
     axes[0].grid(True, alpha=0.3)
 
     axes[1].set_xlabel("Δ")
     axes[1].set_ylabel("Mean path length (m)")
-    axes[1].set_title("Δ vs path length increase")
-    axes[1].legend(fontsize=8)
+    axes[1].set_title("Δ vs path length")
+    axes[1].legend(fontsize=7)
     axes[1].grid(True, alpha=0.3)
 
+    axes[2].set_xlabel("Δ")
+    axes[2].set_ylabel("Mean risk")
+    axes[2].set_title("Δ vs mean risk")
+    axes[2].legend(fontsize=7)
+    axes[2].grid(True, alpha=0.3)
+
     fig.suptitle("NR-CCP Δ Sensitivity", fontsize=12)
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_fallback_grouping(
+    grouping_rows: list[dict],
+    out_path: Path,
+    dpi: int = 150,
+) -> None:
+    """Fallback rate by country / area / aspect ratio bins."""
+    if not grouping_rows:
+        return
+    country_rows = [r for r in grouping_rows if r.get("group_type") == "country"]
+    if not country_rows:
+        return
+
+    prefixes = sorted(set(r["group_value"] for r in country_rows))
+    methods = sorted(set(r["method"] for r in country_rows))
+    x = np.arange(len(prefixes))
+    width = 0.35
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    for i, method in enumerate(methods):
+        rates = []
+        for p in prefixes:
+            subset = [r for r in country_rows if r["group_value"] == p and r["method"] == method]
+            rates.append(float(subset[0]["fallback_rate"]) if subset else 0.0)
+        offset = (i - (len(methods) - 1) / 2) * width
+        ax.bar(x + offset, rates, width, label=_label(method))
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(prefixes)
+    ax.set_ylabel("Fallback rate")
+    ax.set_xlabel("Country prefix")
+    ax.set_title("Fallback by field origin (ee / lt / nl)")
+    ax.legend(fontsize=8)
+    ax.set_ylim(0, 1.05)
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_runtime_comparison(
+    runtime_rows: list[dict],
+    out_path: Path,
+    dpi: int = 150,
+) -> None:
+    """NR pool size fraction vs full enumeration."""
+    if not runtime_rows:
+        return
+    fracs = [float(r["nr_pool_fraction"]) for r in runtime_rows]
+    full_t = [float(r["runtime_full_assess_s"]) for r in runtime_rows]
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
+    axes[0].hist(fracs, bins=20, color="steelblue", edgecolor="white")
+    axes[0].set_xlabel("NR pool / full pool fraction")
+    axes[0].set_ylabel("Field count")
+    axes[0].set_title("Informed pool compression")
+
+    axes[1].scatter(fracs, full_t, alpha=0.5, s=20, c="indianred")
+    axes[1].set_xlabel("NR pool fraction")
+    axes[1].set_ylabel("Full assess runtime (s)")
+    axes[1].set_title("Runtime vs pool size")
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_risk_decomposition(
+    risk_rows: list[dict],
+    out_path: Path,
+    dpi: int = 150,
+) -> None:
+    """Stacked bar of decomposed risk components."""
+    if not risk_rows:
+        return
+    methods = [r["method"] for r in risk_rows]
+    labels = [_label(m) for m in methods]
+    components = ["headland", "hotspot", "pass_count", "repeat", "turn"]
+    colors = ["#e74c3c", "#e67e22", "#f1c40f", "#3498db", "#9b59b6"]
+    x = np.arange(len(methods))
+
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    bottom = np.zeros(len(methods))
+    for comp, color in zip(components, colors):
+        vals = [float(r[f"mean_{comp}_cost"]) for r in risk_rows]
+        ax.bar(x, vals, bottom=bottom, label=comp.replace("_", " "), color=color)
+        bottom += np.array(vals)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=15, ha="right")
+    ax.set_ylabel("Mean component cost")
+    ax.set_title("Risk proxy decomposition")
+    ax.legend(fontsize=8, ncol=3)
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_ablation_summary(
+    ablation_rows: list[dict],
+    out_path: Path,
+    dpi: int = 150,
+) -> None:
+    """Ablation fallback rate and mean risk."""
+    if not ablation_rows:
+        return
+    ablations = sorted(set(r["ablation"] for r in ablation_rows))
+    fb_rates = []
+    risks = []
+    for name in ablations:
+        subset = [r for r in ablation_rows if r["ablation"] == name]
+        n = len(subset)
+        fb = sum(1 for r in subset if str(r.get("fallback", "")).lower() in ("true", "1"))
+        fb_rates.append(fb / n if n else 0.0)
+        risks.append(sum(float(r["mean_risk"]) for r in subset) / n if n else 0.0)
+
+    x = np.arange(len(ablations))
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+    axes[0].bar(x, fb_rates, color="indianred")
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(ablations, rotation=20, ha="right")
+    axes[0].set_ylabel("Fallback rate")
+    axes[0].set_title("Ablation: fallback")
+
+    axes[1].bar(x, risks, color="seagreen")
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(ablations, rotation=20, ha="right")
+    axes[1].set_ylabel("Mean risk")
+    axes[1].set_title("Ablation: mean risk")
+    fig.suptitle("NR-CCP Ablation Study", fontsize=12)
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")

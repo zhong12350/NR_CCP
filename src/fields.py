@@ -13,9 +13,12 @@ from src.geometry import FieldGrid
 
 @dataclass
 class RiskField:
-    """Static planning risk map R(x) in [0, 1]."""
+    """Static planning risk map R(x) in [0, 1] with decomposed layers."""
 
     values: np.ndarray
+    headland_layer: np.ndarray
+    hotspot_layer: np.ndarray
+    pass_count_layer: np.ndarray
     pass_count: np.ndarray | None = None
 
     def sample(self, x: float, y: float, grid: FieldGrid) -> float:
@@ -29,16 +32,23 @@ class RiskField:
         iys = np.clip(iys, 0, grid.ny - 1)
         return self.values[iys, ixs]
 
+    def sample_layer_many(
+        self, layer: np.ndarray, xs: np.ndarray, ys: np.ndarray, grid: FieldGrid
+    ) -> np.ndarray:
+        ixs = ((xs - grid.origin_x) / grid.cell_size_m).astype(int)
+        iys = ((ys - grid.origin_y) / grid.cell_size_m).astype(int)
+        ixs = np.clip(ixs, 0, grid.nx - 1)
+        iys = np.clip(iys, 0, grid.ny - 1)
+        return layer[iys, ixs]
+
 
 def _auto_gaussians(grid: FieldGrid, n: int = 2) -> list[GaussianSpec]:
-    """Place compaction hotspots inside the workable area."""
     inner = grid.geometry.inner
     minx, miny, maxx, maxy = inner.bounds
     w = max(maxx - minx, 1.0)
     h = max(maxy - miny, 1.0)
     cx, cy = inner.centroid.x, inner.centroid.y
     specs: list[GaussianSpec] = []
-
     offsets = [(0.0, 0.0), (0.22, -0.18), (-0.2, 0.15)]
     for i in range(min(n, len(offsets))):
         ox, oy = offsets[i]
@@ -51,7 +61,6 @@ def _auto_gaussians(grid: FieldGrid, n: int = 2) -> list[GaussianSpec]:
 
 
 def estimate_pass_count(grid: FieldGrid, angle_deg: float, swath_width_m: float) -> np.ndarray:
-    """Estimate how many swath passes cover each inner cell at a given angle."""
     from src.candidates import _generate_swath_lines
 
     counts = np.zeros((grid.ny, grid.nx), dtype=float)
@@ -80,7 +89,6 @@ def build_pass_count_layer(
     planner_cfg: PlannerConfig,
     cfg: RiskFieldConfig,
 ) -> np.ndarray:
-    """Combine pass-count estimates over principal swath orientations."""
     if not cfg.use_pass_count:
         return np.zeros((grid.ny, grid.nx), dtype=float)
 
@@ -101,7 +109,10 @@ def build_risk_field(
     cfg: RiskFieldConfig,
     planner_cfg: PlannerConfig | None = None,
 ) -> RiskField:
-    """Build static planning risk proxy with optional pass-count accumulation."""
+    """Build decomposed static planning risk proxy."""
+    headland_layer = np.zeros((grid.ny, grid.nx), dtype=float)
+    hotspot_layer = np.zeros((grid.ny, grid.nx), dtype=float)
+    pass_count_layer = np.zeros((grid.ny, grid.nx), dtype=float)
     risk = np.full((grid.ny, grid.nx), cfg.inner_base, dtype=float)
     geom = grid.geometry
     decay = max(cfg.headland_decay_m, 1e-3)
@@ -115,12 +126,14 @@ def build_risk_field(
             x, y = grid.index_to_world(ix, iy)
             pt = Point(x, y)
             if grid.headland_mask[iy, ix]:
+                headland_layer[iy, ix] = cfg.headland_base
                 risk[iy, ix] = cfg.headland_base
             else:
                 dist_headland = pt.distance(geom.inner.boundary)
                 boost = (cfg.headland_base - cfg.inner_base) * np.exp(
                     -dist_headland / decay
                 )
+                headland_layer[iy, ix] = cfg.inner_base + boost
                 risk[iy, ix] = cfg.inner_base + boost
 
     gaussians = list(cfg.gaussians)
@@ -133,15 +146,29 @@ def build_risk_field(
         hotspot = spec.amplitude * np.exp(
             -0.5 * (((xx - cx) / sx) ** 2 + ((yy - cy) / sy) ** 2)
         )
+        hotspot_layer += hotspot
         risk += hotspot
 
-    pass_count = np.zeros((grid.ny, grid.nx), dtype=float)
     if planner_cfg is not None and cfg.use_pass_count:
-        pass_count = build_pass_count_layer(grid, planner_cfg, cfg)
-        risk += cfg.pass_count_weight * pass_count
+        pass_count_layer = build_pass_count_layer(grid, planner_cfg, cfg)
+        risk += cfg.pass_count_weight * pass_count_layer
 
     risk[~grid.outer_mask] = 0.0
-    if cfg.normalize and risk.max() > 0:
-        risk = risk / risk.max()
+    headland_layer[~grid.outer_mask] = 0.0
+    hotspot_layer[~grid.outer_mask] = 0.0
+    pass_count_layer[~grid.outer_mask] = 0.0
 
-    return RiskField(values=risk, pass_count=pass_count if cfg.use_pass_count else None)
+    if cfg.normalize and risk.max() > 0:
+        scale = risk.max()
+        risk = risk / scale
+        headland_layer = headland_layer / scale
+        hotspot_layer = hotspot_layer / scale
+        pass_count_layer = pass_count_layer / scale
+
+    return RiskField(
+        values=risk,
+        headland_layer=headland_layer,
+        hotspot_layer=hotspot_layer,
+        pass_count_layer=pass_count_layer,
+        pass_count=pass_count_layer if cfg.use_pass_count else None,
+    )

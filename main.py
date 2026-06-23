@@ -37,10 +37,11 @@ def run_single_field(
     wkt_path: Path | None = None,
     output_subdir: str | None = None,
     save_figures: bool = True,
+    verbose: bool = True,
 ) -> tuple[FieldPlanResult, list[MethodMetrics]]:
     wkt = wkt_path or (project_root / config.field.wkt_path)
     t0 = time.perf_counter()
-    result = plan_field(wkt, config)
+    result = plan_field(wkt, config, project_root=project_root)
     elapsed = time.perf_counter() - t0
 
     metrics_list = [
@@ -50,6 +51,9 @@ def run_single_field(
             len(result.full_assessments),
             len(result.informed_assessments),
             config.selection.delta,
+            certificate=result.certificate,
+            runtime_full_assess_s=result.runtime_full_assess_s,
+            runtime_nr_pool_s=result.runtime_nr_pool_s,
         )
         for sel in result.selections
     ]
@@ -76,7 +80,8 @@ def run_single_field(
         _write_csv([m.to_dict() for m in metrics_list], csv_path)
         print(f"  saved {csv_path.relative_to(project_root)}")
 
-    _print_summary(result.field_name, metrics_list, result, elapsed)
+    if verbose:
+        _print_summary(result.field_name, metrics_list, result, elapsed)
     return result, metrics_list
 
 
@@ -100,6 +105,7 @@ def run_batch(config: AppConfig, project_root: Path) -> list[dict]:
                 wkt_path=Path(wkt),
                 output_subdir="batch" if config.batch.save_figures else None,
                 save_figures=config.batch.save_figures,
+                verbose=False,
             )
             all_rows.extend(m.to_dict() for m in metrics)
         except Exception as exc:
@@ -113,6 +119,7 @@ def run_batch(config: AppConfig, project_root: Path) -> list[dict]:
 
     _write_method_summary(all_rows, results_dir / "method_summary.csv", config.selection.delta)
     _write_violation_summary(all_rows, results_dir / "violation_summary.csv")
+    _write_certificate_summary(all_rows, results_dir / "feasibility_certificates.csv")
     return all_rows
 
 
@@ -124,7 +131,7 @@ def run_advisor_demo(config: AppConfig, project_root: Path, n_fields: int = 5) -
 
     print(f"\n=== Advisor demo: {len(wkt_files)} fields → {demo_dir} ===")
     for wkt in wkt_files:
-        result = plan_field(wkt, config)
+        result = plan_field(wkt, config, project_root=project_root)
         for sel in result.selections:
             m = metrics_from_selection(
                 result.field_name,
@@ -132,6 +139,9 @@ def run_advisor_demo(config: AppConfig, project_root: Path, n_fields: int = 5) -
                 len(result.full_assessments),
                 len(result.informed_assessments),
                 config.selection.delta,
+                certificate=result.certificate,
+                runtime_full_assess_s=result.runtime_full_assess_s,
+                runtime_nr_pool_s=result.runtime_nr_pool_s,
             )
             out = demo_dir / f"{result.field_name}_{sel.method}.png"
             plot_field_and_path(
@@ -158,6 +168,30 @@ def _write_method_summary(rows: list[dict], path: Path, delta: float) -> None:
             }
         )
     _write_csv(summary, path)
+    print(f"  saved {path}")
+
+
+def _write_certificate_summary(rows: list[dict], path: Path) -> None:
+    seen = set()
+    cert_rows = []
+    for r in rows:
+        if r["method"] != "rb_ccp" or r["field_name"] in seen:
+            continue
+        seen.add(r["field_name"])
+        cert_rows.append(
+            {
+                "field_name": r["field_name"],
+                "delta": r["delta"],
+                "field_area_m2": r.get("field_area_m2", 0),
+                "aspect_ratio": r.get("aspect_ratio", 0),
+                "boundary_complexity": r.get("boundary_complexity", 0),
+                "cert_best_coverage": r.get("cert_best_coverage", 0),
+                "cert_min_violation": r.get("cert_min_violation", 0),
+                "num_candidates": r.get("num_candidates", 0),
+                "num_informed_candidates": r.get("num_informed_candidates", 0),
+            }
+        )
+    _write_csv(cert_rows, path)
     print(f"  saved {path}")
 
 
@@ -206,7 +240,16 @@ def main(argv: list[str] | None = None) -> int:
     mode = "single"
 
     if argv:
-        if argv[0] in ("batch", "advisor", "analyze", "delta_sweep", "ablation", "train_sampler"):
+        if argv[0] in (
+            "batch",
+            "advisor",
+            "analyze",
+            "delta_sweep",
+            "ablation",
+            "train_sampler",
+            "paper_tables",
+            "import_f2c",
+        ):
             mode = argv[0]
             argv = argv[1:]
         elif argv[0].endswith(".yaml"):
@@ -243,6 +286,14 @@ def main(argv: list[str] | None = None) -> int:
         from scripts.train_informed_sampler import train_sampler
 
         return train_sampler(config, root)
+    elif mode == "paper_tables":
+        from scripts.generate_paper_tables import generate_paper_tables
+
+        return generate_paper_tables(root, config)
+    elif mode == "import_f2c":
+        from scripts.import_fields2cover import import_fields2cover
+
+        return import_fields2cover(config, root)
     else:
         wkt = Path(argv[0]) if argv else None
         run_single_field(config, root, wkt_path=wkt)

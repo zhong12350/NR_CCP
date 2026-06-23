@@ -51,7 +51,7 @@ def run_ablation(config: AppConfig, project_root: Path) -> int:
 
         for wkt in wkt_files:
             try:
-                result = plan_field(wkt, cfg)
+                result = plan_field(wkt, cfg, project_root=project_root)
                 for sel in result.selections:
                     m = metrics_from_selection(
                         result.field_name,
@@ -59,6 +59,9 @@ def run_ablation(config: AppConfig, project_root: Path) -> int:
                         len(result.full_assessments),
                         len(result.informed_assessments),
                         cfg.selection.delta,
+                        certificate=result.certificate,
+                        runtime_full_assess_s=result.runtime_full_assess_s,
+                        runtime_nr_pool_s=result.runtime_nr_pool_s,
                     )
                     row = m.to_dict()
                     row["ablation"] = name

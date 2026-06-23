@@ -72,14 +72,18 @@ def train_sampler(config: AppConfig, project_root: Path) -> int:
                 best = min(assess, key=lambda a: a.mean_risk + 0.001 * a.path_length_m)
                 sampler = InformedAngleSampler(config.informed_sampling, config.seed)
 
-                for angle in np.arange(0, 180, 30):
+                min_len = min(a.path_length_m for a in assess)
+                for angle in np.arange(0, 180, 15):
                     x = _feature_vector(
                         sampler, grid, risk, float(angle), config.planner.swath_width_m
                     )
-                    target = 1.0 if abs(angle - best.angle_deg) < 10 else 0.0
-                    target -= 0.3 * sampler.angle_proxy_risk(
+                    proxy = sampler.angle_proxy_risk(
                         grid, risk, float(angle), config.planner.swath_width_m
                     )
+                    # Target: low violation proxy + low path-length cost angle.
+                    target = -(proxy + 0.001 * min_len)
+                    if abs(angle - best.angle_deg) < 5:
+                        target += 0.5
                     h = np.tanh(np.clip(x @ model.w1 + model.b1, -10, 10))
                     pred = float((h @ model.w2 + model.b2).item())
                     err = np.clip(pred - target, -2.0, 2.0)
