@@ -41,6 +41,17 @@ informed_sampling:
   learned_weight: 0.35
   model_path: models/informed_sampler.npz
 
+vehicle:
+  mass_kg: 3000.0
+  tire_width_m: 0.35
+  contact_length_m: 0.45
+
+soil:
+  moisture: 0.30
+
+physics:
+  enabled: true
+
 methods:
   - naive
   - weighted

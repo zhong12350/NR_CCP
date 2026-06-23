@@ -12,6 +12,7 @@ from src.candidates import CandidatePath, enumerate_candidates, generate_candida
 from src.config_loader import AppConfig
 from src.fields import RiskField
 from src.geometry import FieldGrid
+from src.physics import PhysicsFactors
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ def resolve_fields2cover_assessment(
     config: AppConfig,
     official_records: dict[str, Fields2CoverRecord],
     full_assessments: list[PathAssessment],
+    physics_factors: PhysicsFactors | None = None,
 ) -> PathAssessment:
     """
     Resolve Fields2Cover baseline:
@@ -93,6 +95,7 @@ def resolve_fields2cover_assessment(
             config.planner,
             config.selection.lambda_weighted,
             config.selection.beta_rb_ccp,
+            physics_factors=physics_factors,
         )
         return assessed
 
@@ -107,6 +110,7 @@ def resolve_fields2cover_assessment(
             config.planner,
             config.selection.lambda_weighted,
             config.selection.beta_rb_ccp,
+            physics_factors=physics_factors,
         )
 
     return min(full_assessments, key=lambda a: a.path_length_m)

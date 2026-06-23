@@ -251,6 +251,17 @@ def generate_paper_tables(project_root: Path, config: AppConfig) -> int:
         )
         print(f"  saved paper_budget_experiment.png")
 
+    physics_rows = _read_csv(results_dir / "physics_sensitivity_results.csv")
+    if physics_rows:
+        from src.visualization import plot_physics_sensitivity
+
+        plot_physics_sensitivity(
+            physics_rows,
+            figures_dir / "paper_physics_sensitivity.png",
+            dpi=config.output.dpi,
+        )
+        print(f"  saved paper_physics_sensitivity.png")
+
     return 0
 
 

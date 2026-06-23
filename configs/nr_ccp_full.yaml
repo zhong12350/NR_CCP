@@ -44,6 +44,29 @@ informed_sampling:
   learned_weight: 0.35
   model_path: models/informed_sampler.npz
 
+vehicle:
+  mass_kg: 3000.0
+  gravity: 9.81
+  axle_load_ratio: 0.5
+  wheels_per_axle: 2
+  tire_width_m: 0.35
+  contact_length_m: 0.45
+  tire_inflation_pressure_kpa: 120.0
+  load_ref_n: 7000.0
+  pressure_ref_kpa: 47.0
+  load_exponent: 1.0
+  pressure_exponent: 1.0
+
+soil:
+  moisture: 0.30
+  moisture_crit: 0.30
+  moisture_gain: 1.5
+  moisture_steepness: 12.0
+
+physics:
+  enabled: true
+  clip_max_factor: 4.0
+
 methods:
   - naive
   - weighted

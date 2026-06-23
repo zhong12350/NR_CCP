@@ -37,6 +37,12 @@ class MethodMetrics:
     boundary_complexity: float = 0.0
     cert_min_violation: float = 0.0
     cert_best_coverage: float = 0.0
+    wheel_load_n: float = 0.0
+    contact_pressure_kpa: float = 0.0
+    load_factor: float = 1.0
+    pressure_factor: float = 1.0
+    moisture_factor: float = 1.0
+    physics_factor: float = 1.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -89,4 +95,10 @@ def metrics_from_selection(
         boundary_complexity=cert.boundary_complexity if cert else 0.0,
         cert_min_violation=cert.min_violation if cert else 0.0,
         cert_best_coverage=cert.best_coverage if cert else 0.0,
+        wheel_load_n=a.wheel_load_n,
+        contact_pressure_kpa=a.contact_pressure_kpa,
+        load_factor=a.load_factor,
+        pressure_factor=a.pressure_factor,
+        moisture_factor=a.moisture_factor,
+        physics_factor=a.physics_factor,
     )

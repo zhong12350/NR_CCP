@@ -497,3 +497,48 @@ def plot_budget_experiment(rows: list[dict], out_path: Path, dpi: int = 150) -> 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
+
+
+def plot_physics_sensitivity(rows: list[dict], out_path: Path, dpi: int = 150) -> None:
+    """Fallback and mean risk vs wheel load / pressure / moisture sweeps."""
+    if not rows:
+        return
+
+    sweeps = ["wheel_load", "tire_pressure", "soil_moisture"]
+    titles = {
+        "wheel_load": "Wheel load (mass_kg)",
+        "tire_pressure": "Tire contact (contact_length_m)",
+        "soil_moisture": "Soil moisture",
+    }
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
+
+    for ax, sweep in zip(axes, sweeps):
+        subset_all = [r for r in rows if r.get("sweep") == sweep]
+        if not subset_all:
+            continue
+        values = sorted(set(float(r["sweep_value"]) for r in subset_all))
+        fb_rates = []
+        risks = []
+        for value in values:
+            subset = [r for r in subset_all if float(r["sweep_value"]) == value]
+            n = len(subset)
+            fb_rates.append(
+                sum(1 for r in subset if str(r["fallback"]).lower() in ("true", "1")) / n
+            )
+            risks.append(sum(float(r["mean_risk"]) for r in subset) / n)
+
+        ax2 = ax.twinx()
+        ax.plot(values, fb_rates, marker="o", color="indianred", label="fallback")
+        ax2.plot(values, risks, marker="s", color="seagreen", label="mean risk")
+        ax.set_title(titles.get(sweep, sweep))
+        ax.set_xlabel("Parameter value")
+        ax.set_ylabel("Fallback rate", color="indianred")
+        ax2.set_ylabel("Mean risk", color="seagreen")
+        ax.set_ylim(0, 1.05)
+        ax.grid(True, alpha=0.3)
+
+    fig.suptitle("Physics-Informed Risk Sensitivity (RB-CCP)", fontsize=12)
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)

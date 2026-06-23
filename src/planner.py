@@ -17,6 +17,7 @@ from src.config_loader import AppConfig
 from src.fields import RiskField, build_risk_field
 from src.fields2cover_baseline import load_official_records, resolve_fields2cover_assessment
 from src.geometry import FieldGrid, load_field_from_wkt
+from src.physics import compute_physics_factors
 from src.risk_search import build_candidate_pools
 from src.selectors import SelectionResult, select_all, select_rb_ccp
 
@@ -58,6 +59,7 @@ def plan_field(
         auto_cell_size=config.field.auto_cell_size,
     )
     risk = build_risk_field(grid, config.risk_field, config.planner)
+    physics_factors = compute_physics_factors(config.vehicle, config.soil, config.physics)
 
     full_cands = enumerate_candidates(grid, config.planner)
     assess_kwargs = dict(
@@ -68,6 +70,7 @@ def plan_field(
         lambda_weighted=config.selection.lambda_weighted,
         beta_rb=config.selection.beta_rb_ccp,
         min_coverage=config.planner.min_coverage,
+        physics_factors=physics_factors,
     )
 
     t0 = time.perf_counter()
@@ -104,7 +107,13 @@ def plan_field(
         root = project_root or Path.cwd()
         records = official_records if official_records is not None else load_official_records(root)
         f2c_assess = resolve_fields2cover_assessment(
-            path.stem, grid, risk, config, records, full_assess
+            path.stem,
+            grid,
+            risk,
+            config,
+            records,
+            full_assess,
+            physics_factors=physics_factors,
         )
         selections = [
             s

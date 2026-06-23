@@ -17,6 +17,7 @@ from src.config_loader import AppConfig, load_config
 from src.fields import build_risk_field
 from src.geometry import load_field_from_wkt
 from src.informed_sampling import InformedAngleSampler, default_model, save_model
+from src.physics import compute_physics_factors
 from src.risk_search import build_candidate_pools
 
 
@@ -66,6 +67,9 @@ def train_sampler(config: AppConfig, project_root: Path) -> int:
                     config.selection.lambda_weighted,
                     config.selection.beta_rb_ccp,
                     config.planner.min_coverage,
+                    physics_factors=compute_physics_factors(
+                        config.vehicle, config.soil, config.physics
+                    ),
                 )
                 if not assess:
                     continue

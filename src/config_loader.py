@@ -73,6 +73,35 @@ class InformedSamplingConfig:
 
 
 @dataclass
+class VehicleConfig:
+    mass_kg: float = 3000.0
+    gravity: float = 9.81
+    axle_load_ratio: float = 0.5
+    wheels_per_axle: int = 2
+    tire_width_m: float = 0.35
+    contact_length_m: float = 0.45
+    tire_inflation_pressure_kpa: float = 120.0
+    load_ref_n: float = 7000.0
+    pressure_ref_kpa: float = 100.0
+    load_exponent: float = 1.0
+    pressure_exponent: float = 1.0
+
+
+@dataclass
+class SoilConfig:
+    moisture: float = 0.30
+    moisture_crit: float = 0.30
+    moisture_gain: float = 1.5
+    moisture_steepness: float = 12.0
+
+
+@dataclass
+class PhysicsConfig:
+    enabled: bool = True
+    clip_max_factor: float = 4.0
+
+
+@dataclass
 class BatchConfig:
     field_glob: str = "wkt/*.wkt"
     max_fields: int = 350
@@ -97,6 +126,9 @@ class AppConfig:
     planner: PlannerConfig = dc_field(default_factory=PlannerConfig)
     selection: SelectionConfig = dc_field(default_factory=SelectionConfig)
     informed_sampling: InformedSamplingConfig = dc_field(default_factory=InformedSamplingConfig)
+    vehicle: VehicleConfig = dc_field(default_factory=VehicleConfig)
+    soil: SoilConfig = dc_field(default_factory=SoilConfig)
+    physics: PhysicsConfig = dc_field(default_factory=PhysicsConfig)
     methods: list[str] = dc_field(default_factory=list)
     batch: BatchConfig = dc_field(default_factory=BatchConfig)
     output: OutputConfig = dc_field(default_factory=OutputConfig)
@@ -124,6 +156,9 @@ def load_config(path: str | Path) -> AppConfig:
     informed_raw = raw.get("informed_sampling", {})
     batch_raw = raw.get("batch", {})
     output_raw = raw.get("output", {})
+    vehicle_raw = raw.get("vehicle", {})
+    soil_raw = raw.get("soil", {})
+    physics_raw = raw.get("physics", {})
 
     gaussians = [_parse_gaussian(g) for g in risk_raw.get("gaussians", [])]
     cell_raw = field_raw.get("cell_size_m")
@@ -172,6 +207,31 @@ def load_config(path: str | Path) -> AppConfig:
             include_principal_axes=bool(informed_raw.get("include_principal_axes", True)),
             learned_weight=float(informed_raw.get("learned_weight", 0.35)),
             model_path=informed_raw.get("model_path"),
+        ),
+        vehicle=VehicleConfig(
+            mass_kg=float(vehicle_raw.get("mass_kg", 3000.0)),
+            gravity=float(vehicle_raw.get("gravity", 9.81)),
+            axle_load_ratio=float(vehicle_raw.get("axle_load_ratio", 0.5)),
+            wheels_per_axle=int(vehicle_raw.get("wheels_per_axle", 2)),
+            tire_width_m=float(vehicle_raw.get("tire_width_m", 0.35)),
+            contact_length_m=float(vehicle_raw.get("contact_length_m", 0.45)),
+            tire_inflation_pressure_kpa=float(
+                vehicle_raw.get("tire_inflation_pressure_kpa", 120.0)
+            ),
+            load_ref_n=float(vehicle_raw.get("load_ref_n", 7000.0)),
+            pressure_ref_kpa=float(vehicle_raw.get("pressure_ref_kpa", 100.0)),
+            load_exponent=float(vehicle_raw.get("load_exponent", 1.0)),
+            pressure_exponent=float(vehicle_raw.get("pressure_exponent", 1.0)),
+        ),
+        soil=SoilConfig(
+            moisture=float(soil_raw.get("moisture", 0.30)),
+            moisture_crit=float(soil_raw.get("moisture_crit", 0.30)),
+            moisture_gain=float(soil_raw.get("moisture_gain", 1.5)),
+            moisture_steepness=float(soil_raw.get("moisture_steepness", 12.0)),
+        ),
+        physics=PhysicsConfig(
+            enabled=bool(physics_raw.get("enabled", True)),
+            clip_max_factor=float(physics_raw.get("clip_max_factor", 4.0)),
         ),
         methods=list(
             raw.get(

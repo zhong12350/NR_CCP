@@ -20,6 +20,7 @@ from src.config_loader import AppConfig, load_config
 from src.fields import build_risk_field
 from src.geometry import load_field_from_wkt
 from src.metrics import metrics_from_selection
+from src.physics import compute_physics_factors
 from src.risk_search import rank_candidates_by_prior
 from src.selectors import SelectionResult, select_rb_ccp
 from src.visualization import plot_budget_experiment
@@ -134,6 +135,9 @@ def run_budget_experiment(config: AppConfig, project_root: Path) -> int:
             )
             risk = build_risk_field(grid, config.risk_field, config.planner)
             full_candidates = enumerate_candidates(grid, config.planner)
+            physics_factors = compute_physics_factors(
+                config.vehicle, config.soil, config.physics
+            )
             full_assessments = assess_all_candidates(
                 full_candidates,
                 grid,
@@ -143,6 +147,7 @@ def run_budget_experiment(config: AppConfig, project_root: Path) -> int:
                 config.selection.lambda_weighted,
                 config.selection.beta_rb_ccp,
                 config.planner.min_coverage,
+                physics_factors=physics_factors,
             )
             if not full_assessments:
                 continue

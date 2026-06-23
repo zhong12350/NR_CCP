@@ -10,6 +10,7 @@ from src.candidates import CandidatePath
 from src.config_loader import PlannerConfig, RiskFieldConfig
 from src.fields import RiskField
 from src.geometry import FieldGrid
+from src.physics import PhysicsFactors
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,12 @@ class PathAssessment:
     pass_count_cost: float = 0.0
     repeat_cost: float = 0.0
     turn_cost: float = 0.0
+    wheel_load_n: float = 0.0
+    contact_pressure_kpa: float = 0.0
+    load_factor: float = 1.0
+    pressure_factor: float = 1.0
+    moisture_factor: float = 1.0
+    physics_factor: float = 1.0
 
     @property
     def angle_deg(self) -> float:
@@ -124,10 +131,12 @@ def assess_candidate(
     planner_cfg: PlannerConfig,
     lambda_weighted: float,
     beta_rb: float,
+    physics_factors: PhysicsFactors | None = None,
 ) -> PathAssessment:
-    """Risk Assessor with decomposed compaction components."""
+    """Risk Assessor with decomposed compaction and physics-informed factors."""
     waypoints = _densify_waypoints(candidate.waypoints, planner_cfg.waypoint_spacing_m / 2)
     L = path_length(candidate.waypoints)
+    physics = physics_factors.combined_factor if physics_factors else 1.0
 
     visit_count = np.zeros((grid.ny, grid.nx), dtype=int)
     static_samples: list[float] = []
@@ -145,13 +154,13 @@ def assess_candidate(
         n = max(2, int(np.ceil(seg_len / 1.0)) + 1)
         xs = np.linspace(x0, x1, n)
         ys = np.linspace(y0, y1, n)
-        base_r = risk.sample_many(xs, ys, grid)
-        head_r = risk.sample_layer_many(risk.headland_layer, xs, ys, grid)
-        hot_r = risk.sample_layer_many(risk.hotspot_layer, xs, ys, grid)
-        pass_r = risk.sample_layer_many(risk.pass_count_layer, xs, ys, grid)
+        base_r = risk.sample_many(xs, ys, grid) * physics
+        head_r = risk.sample_layer_many(risk.headland_layer, xs, ys, grid) * physics
+        hot_r = risk.sample_layer_many(risk.hotspot_layer, xs, ys, grid) * physics
+        pass_r = risk.sample_layer_many(risk.pass_count_layer, xs, ys, grid) * physics
 
         for i in range(len(xs)):
-            static_samples.append(float(base_r[i]))
+            static_samples.append(float(min(1.0, base_r[i])))
             static_weights.append(seg_len / n)
 
         dynamic_r = base_r.copy()
@@ -202,6 +211,12 @@ def assess_candidate(
         pass_count_cost=pass_count_cost,
         repeat_cost=repeat_cost,
         turn_cost=turn_cost,
+        wheel_load_n=physics_factors.wheel_load_n if physics_factors else 0.0,
+        contact_pressure_kpa=physics_factors.contact_pressure_kpa if physics_factors else 0.0,
+        load_factor=physics_factors.load_factor if physics_factors else 1.0,
+        pressure_factor=physics_factors.pressure_factor if physics_factors else 1.0,
+        moisture_factor=physics_factors.moisture_factor if physics_factors else 1.0,
+        physics_factor=physics,
     )
 
 
@@ -214,13 +229,21 @@ def assess_all_candidates(
     lambda_weighted: float,
     beta_rb: float,
     min_coverage: float,
+    physics_factors: PhysicsFactors | None = None,
 ) -> list[PathAssessment]:
     if not candidates:
         return []
 
     all_assessed = [
         assess_candidate(
-            cand, grid, risk, risk_cfg, planner_cfg, lambda_weighted, beta_rb
+            cand,
+            grid,
+            risk,
+            risk_cfg,
+            planner_cfg,
+            lambda_weighted,
+            beta_rb,
+            physics_factors=physics_factors,
         )
         for cand in candidates
     ]
