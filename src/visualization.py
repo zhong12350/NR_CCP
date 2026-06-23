@@ -429,3 +429,71 @@ def plot_ablation_summary(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
+
+
+def plot_budget_experiment(rows: list[dict], out_path: Path, dpi: int = 150) -> None:
+    """Fixed-budget NR-prior vs uniform/random comparison."""
+    if not rows:
+        return
+
+    def as_bool(value) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value).lower() in ("true", "1", "yes")
+
+    strategies = [s for s in ("nr_prior", "uniform", "random") if any(r["strategy"] == s for r in rows)]
+    budgets = sorted(
+        {
+            int(r["budget"])
+            for r in rows
+            if r.get("strategy") in strategies
+        }
+    )
+    if not strategies or not budgets:
+        return
+
+    colors = {"nr_prior": "purple", "uniform": "steelblue", "random": "gray"}
+    labels = {"nr_prior": "NR prior", "uniform": "Uniform-k", "random": "Random-k"}
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
+
+    for strategy in strategies:
+        fb_rates = []
+        match_rates = []
+        risk_gaps = []
+        for budget in budgets:
+            subset = [
+                r
+                for r in rows
+                if r["strategy"] == strategy and int(r["budget"]) == budget
+            ]
+            if not subset:
+                fb_rates.append(0.0)
+                match_rates.append(0.0)
+                risk_gaps.append(0.0)
+                continue
+            fb_rates.append(sum(1 for r in subset if as_bool(r["fallback"])) / len(subset))
+            match_rates.append(sum(1 for r in subset if as_bool(r["same_as_oracle"])) / len(subset))
+            risk_gaps.append(
+                sum(float(r["risk_gap_vs_oracle"]) for r in subset) / len(subset)
+            )
+
+        axes[0].plot(budgets, fb_rates, marker="o", label=labels[strategy], color=colors[strategy])
+        axes[1].plot(budgets, match_rates, marker="o", label=labels[strategy], color=colors[strategy])
+        axes[2].plot(budgets, risk_gaps, marker="o", label=labels[strategy], color=colors[strategy])
+
+    axes[0].set_title("Fallback Rate")
+    axes[0].set_ylabel("Rate")
+    axes[1].set_title("Oracle Angle Match")
+    axes[1].set_ylabel("Rate")
+    axes[2].set_title("Mean Risk Gap vs RB-full")
+    axes[2].set_ylabel("Risk gap")
+    for ax in axes:
+        ax.set_xlabel("Candidate budget k")
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8)
+
+    fig.suptitle("Fixed-Budget Candidate Search", fontsize=12)
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)

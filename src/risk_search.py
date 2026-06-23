@@ -52,6 +52,31 @@ def generate_informed_candidates(
     return candidates
 
 
+def rank_candidates_by_prior(
+    candidates: list[CandidatePath],
+    grid: FieldGrid,
+    risk: RiskField,
+    planner_cfg: PlannerConfig,
+    sampling_cfg: InformedSamplingConfig,
+    seed: int = 42,
+) -> list[CandidatePath]:
+    """Rank an existing candidate pool by the NR learned/heuristic prior."""
+    if not candidates:
+        return []
+
+    sampler = InformedAngleSampler(sampling_cfg, seed=seed)
+    scored = [
+        (
+            sampler.score_angle(grid, risk, cand.angle_deg, planner_cfg.swath_width_m),
+            -cand.swath_count,
+            cand,
+        )
+        for cand in candidates
+    ]
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [cand for _, _, cand in scored]
+
+
 def build_nr_ccp_pool(
     full_candidates: list[CandidatePath],
     full_assessments: list[PathAssessment],

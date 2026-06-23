@@ -249,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
             "train_sampler",
             "paper_tables",
             "import_f2c",
+            "budget_experiment",
         ):
             mode = argv[0]
             argv = argv[1:]
@@ -294,6 +295,10 @@ def main(argv: list[str] | None = None) -> int:
         from scripts.import_fields2cover import import_fields2cover
 
         return import_fields2cover(config, root)
+    elif mode == "budget_experiment":
+        from scripts.run_budget_experiment import run_budget_experiment
+
+        return run_budget_experiment(config, root)
     else:
         wkt = Path(argv[0]) if argv else None
         run_single_field(config, root, wkt_path=wkt)

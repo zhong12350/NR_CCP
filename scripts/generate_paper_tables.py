@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 from src.config_loader import AppConfig, load_config
 from src.visualization import (
     plot_ablation_summary,
+    plot_budget_experiment,
     plot_delta_sweep,
     plot_fallback_grouping,
     plot_pareto,
@@ -240,6 +241,15 @@ def generate_paper_tables(project_root: Path, config: AppConfig) -> int:
     if ablation_rows:
         plot_ablation_summary(ablation_rows, figures_dir / "paper_ablation.png", dpi=config.output.dpi)
         print(f"  saved paper_ablation.png")
+
+    budget_rows = _read_csv(results_dir / "budget_experiment_results.csv")
+    if budget_rows:
+        plot_budget_experiment(
+            budget_rows,
+            figures_dir / "paper_budget_experiment.png",
+            dpi=config.output.dpi,
+        )
+        print(f"  saved paper_budget_experiment.png")
 
     return 0
 

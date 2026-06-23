@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Five ablation groups from proposal §11.2."""
+"""Ablation study for risk-bound and risk-component contributions."""
 
 from __future__ import annotations
 
@@ -18,12 +18,29 @@ from src.planner import plan_field
 
 
 ABLATIONS = [
-    ("baseline", {}),
-    ("no_risk_bound", {"selection.delta": 999.0}),
+    # Main risk-bound baselines.
+    ("baseline_rb", {"methods": ["rb_ccp"]}),
+    ("no_risk_bound", {"methods": ["rb_ccp"], "selection.delta": 999.0}),
     ("weighted_only", {"methods": ["weighted"]}),
-    ("no_pass_count", {"risk_field.use_pass_count": False}),
-    ("no_informed_sampling", {"informed_sampling.enabled": False, "methods": ["nr_ccp"]}),
+    ("no_informed_sampling", {"methods": ["nr_ccp"], "informed_sampling.enabled": False}),
+    # Risk proxy component ablations. Each one keeps the RB-CCP selector fixed
+    # so that changes are attributable to the risk model, not method mixing.
+    ("no_headland", {"methods": ["rb_ccp"], "risk_field.headland_base": "inner_base"}),
+    ("no_hotspot", {"methods": ["rb_ccp"], "risk_field.auto_hotspots": False, "risk_field.gaussians": []}),
+    ("no_pass_count", {"methods": ["rb_ccp"], "risk_field.use_pass_count": False}),
+    ("no_repeat", {"methods": ["rb_ccp"], "risk_field.repeat_penalty": 0.0}),
+    ("no_turn", {"methods": ["rb_ccp"], "risk_field.turning_penalty": 0.0}),
 ]
+
+
+RISK_COMPONENT = {
+    "baseline_rb": "all",
+    "no_headland": "headland",
+    "no_hotspot": "hotspot",
+    "no_pass_count": "pass_count",
+    "no_repeat": "repeat",
+    "no_turn": "turn",
+}
 
 
 def _apply_override(cfg: AppConfig, key: str, value) -> None:
@@ -31,6 +48,8 @@ def _apply_override(cfg: AppConfig, key: str, value) -> None:
     obj = cfg
     for p in parts[:-1]:
         obj = getattr(obj, p)
+    if value == "inner_base":
+        value = cfg.risk_field.inner_base
     setattr(obj, parts[-1], value)
 
 
@@ -44,10 +63,6 @@ def run_ablation(config: AppConfig, project_root: Path) -> int:
         cfg = deepcopy(config)
         for k, v in overrides.items():
             _apply_override(cfg, k, v)
-        if name == "weighted_only":
-            cfg.methods = ["weighted"]
-        elif name == "no_informed_sampling":
-            cfg.methods = ["nr_ccp"]
 
         for wkt in wkt_files:
             try:
@@ -65,6 +80,7 @@ def run_ablation(config: AppConfig, project_root: Path) -> int:
                     )
                     row = m.to_dict()
                     row["ablation"] = name
+                    row["risk_component_removed"] = RISK_COMPONENT.get(name, "")
                     rows.append(row)
             except Exception as exc:
                 print(f"  skip {Path(wkt).stem}: {exc}")
