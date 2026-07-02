@@ -1,4 +1,4 @@
-"""Planning risk proxy: headland + hotspots + pass-count accumulation."""
+"""Uncertain planning risk field: mean proxy + epistemic uncertainty layers."""
 
 from __future__ import annotations
 
@@ -13,12 +13,16 @@ from src.geometry import FieldGrid
 
 @dataclass
 class RiskField:
-    """Static planning risk map R(x) in [0, 1] with decomposed layers."""
+    """Planning risk map R(x) with mean and uncertainty layers."""
 
     values: np.ndarray
+    uncertainty: np.ndarray
     headland_layer: np.ndarray
     hotspot_layer: np.ndarray
     pass_count_layer: np.ndarray
+    headland_uncertainty_layer: np.ndarray | None = None
+    hotspot_uncertainty_layer: np.ndarray | None = None
+    pass_count_uncertainty_layer: np.ndarray | None = None
     pass_count: np.ndarray | None = None
 
     def sample(self, x: float, y: float, grid: FieldGrid) -> float:
@@ -26,11 +30,23 @@ class RiskField:
         return float(self.values[iy, ix])
 
     def sample_many(self, xs: np.ndarray, ys: np.ndarray, grid: FieldGrid) -> np.ndarray:
+        ixs, iys = self._indices(xs, ys, grid)
+        return self.values[iys, ixs]
+
+    def sample_uncertainty_many(
+        self, xs: np.ndarray, ys: np.ndarray, grid: FieldGrid
+    ) -> np.ndarray:
+        ixs, iys = self._indices(xs, ys, grid)
+        return self.uncertainty[iys, ixs]
+
+    def _indices(
+        self, xs: np.ndarray, ys: np.ndarray, grid: FieldGrid
+    ) -> tuple[np.ndarray, np.ndarray]:
         ixs = ((xs - grid.origin_x) / grid.cell_size_m).astype(int)
         iys = ((ys - grid.origin_y) / grid.cell_size_m).astype(int)
         ixs = np.clip(ixs, 0, grid.nx - 1)
         iys = np.clip(iys, 0, grid.ny - 1)
-        return self.values[iys, ixs]
+        return ixs, iys
 
     def sample_layer_many(
         self, layer: np.ndarray, xs: np.ndarray, ys: np.ndarray, grid: FieldGrid
@@ -109,11 +125,12 @@ def build_risk_field(
     cfg: RiskFieldConfig,
     planner_cfg: PlannerConfig | None = None,
 ) -> RiskField:
-    """Build decomposed static planning risk proxy."""
+    """Build decomposed planning risk with epistemic uncertainty."""
     headland_layer = np.zeros((grid.ny, grid.nx), dtype=float)
     hotspot_layer = np.zeros((grid.ny, grid.nx), dtype=float)
     pass_count_layer = np.zeros((grid.ny, grid.nx), dtype=float)
     risk = np.full((grid.ny, grid.nx), cfg.inner_base, dtype=float)
+    uncertainty_var = np.zeros((grid.ny, grid.nx), dtype=float)
     geom = grid.geometry
     decay = max(cfg.headland_decay_m, 1e-3)
     xx, yy = np.meshgrid(grid.x_coords, grid.y_coords)
@@ -128,6 +145,7 @@ def build_risk_field(
             if grid.headland_mask[iy, ix]:
                 headland_layer[iy, ix] = cfg.headland_base
                 risk[iy, ix] = cfg.headland_base
+                uncertainty_var[iy, ix] += cfg.headland_uncertainty**2
             else:
                 dist_headland = pt.distance(geom.inner.boundary)
                 boost = (cfg.headland_base - cfg.inner_base) * np.exp(
@@ -135,6 +153,8 @@ def build_risk_field(
                 )
                 headland_layer[iy, ix] = cfg.inner_base + boost
                 risk[iy, ix] = cfg.inner_base + boost
+                boundary_unc = cfg.headland_uncertainty * np.exp(-dist_headland / decay)
+                uncertainty_var[iy, ix] += boundary_unc**2
 
     gaussians = list(cfg.gaussians)
     if cfg.auto_hotspots and not gaussians:
@@ -148,15 +168,24 @@ def build_risk_field(
         )
         hotspot_layer += hotspot
         risk += hotspot
+        uncertainty_var += (cfg.hotspot_uncertainty * hotspot / max(spec.amplitude, 1e-6)) ** 2
 
     if planner_cfg is not None and cfg.use_pass_count:
         pass_count_layer = build_pass_count_layer(grid, planner_cfg, cfg)
         risk += cfg.pass_count_weight * pass_count_layer
+        uncertainty_var += (cfg.pass_count_uncertainty * pass_count_layer) ** 2
 
     risk[~grid.outer_mask] = 0.0
     headland_layer[~grid.outer_mask] = 0.0
     hotspot_layer[~grid.outer_mask] = 0.0
     pass_count_layer[~grid.outer_mask] = 0.0
+    uncertainty_var[~grid.outer_mask] = 0.0
+
+    if cfg.uncertainty_enabled:
+        uncertainty = np.sqrt(uncertainty_var + cfg.uncertainty_base**2)
+        uncertainty[~grid.outer_mask] = 0.0
+    else:
+        uncertainty = np.zeros_like(risk)
 
     if cfg.normalize and risk.max() > 0:
         scale = risk.max()
@@ -164,11 +193,20 @@ def build_risk_field(
         headland_layer = headland_layer / scale
         hotspot_layer = hotspot_layer / scale
         pass_count_layer = pass_count_layer / scale
+        uncertainty = uncertainty / scale
+
+    headland_uncertainty_layer = cfg.headland_uncertainty * np.clip(headland_layer, 0.0, 1.0)
+    hotspot_uncertainty_layer = cfg.hotspot_uncertainty * np.clip(hotspot_layer, 0.0, 1.0)
+    pass_count_uncertainty_layer = cfg.pass_count_uncertainty * np.clip(pass_count_layer, 0.0, 1.0)
 
     return RiskField(
         values=risk,
+        uncertainty=uncertainty,
         headland_layer=headland_layer,
         hotspot_layer=hotspot_layer,
         pass_count_layer=pass_count_layer,
+        headland_uncertainty_layer=headland_uncertainty_layer,
+        hotspot_uncertainty_layer=hotspot_uncertainty_layer,
+        pass_count_uncertainty_layer=pass_count_uncertainty_layer,
         pass_count=pass_count_layer if cfg.use_pass_count else None,
     )

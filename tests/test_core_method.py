@@ -15,6 +15,7 @@ from src.candidates import CandidatePath, _generate_swath_lines
 from src.config_loader import PlannerConfig, RiskFieldConfig, load_config
 from src.fields import build_risk_field
 from src.geometry import build_field_geometry, rasterize_geometry
+from src.informed_sampling import FEATURE_DIM, InformedAngleSampler
 from src.planner import plan_field
 from src.selectors import select_nr_ccp
 
@@ -39,6 +40,32 @@ def test_coverage_uses_polygon_sweep():
     pts = [(10, 10), (110, 10)]
     cov = compute_coverage_rate(pts, grid, planner.swath_width_m / 2.0)
     assert 0.0 < cov < 1.0
+
+
+def test_risk_field_has_uncertainty_and_cvar_assessment():
+    grid, planner, risk = _demo_grid()
+    assert risk.uncertainty[grid.inner_mask].mean() > 0.0
+    cand = CandidatePath(0.0, [(10, 10), (110, 10)], 1)
+    from src.assessor import assess_candidate
+
+    assessment = assess_candidate(
+        cand,
+        grid,
+        risk,
+        RiskFieldConfig(auto_hotspots=False, gaussians=[], use_pass_count=False),
+        planner,
+        lambda_weighted=0.8,
+        beta_rb=1.0,
+    )
+    assert assessment.cvar_risk >= assessment.mean_risk
+    assert assessment.bound_risk == assessment.cvar_risk
+
+
+def test_neural_sampler_uses_full_feature_vector():
+    grid, planner, risk = _demo_grid()
+    sampler = InformedAngleSampler(load_config(ROOT / "configs" / "default.yaml").informed_sampling)
+    x = sampler.feature_vector(grid, risk, 45.0, planner.swath_width_m)
+    assert x.shape == (FEATURE_DIM,)
 
 
 def test_concave_field_keeps_multiple_swath_segments():
@@ -104,6 +131,8 @@ if __name__ == "__main__":
     for t in [
         test_path_length_euclidean,
         test_coverage_uses_polygon_sweep,
+        test_risk_field_has_uncertainty_and_cvar_assessment,
+        test_neural_sampler_uses_full_feature_vector,
         test_concave_field_keeps_multiple_swath_segments,
         test_filter_by_coverage_no_silent_relaxation,
         test_nr_ccp_independent_pool_smaller_than_full,

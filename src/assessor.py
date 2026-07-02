@@ -27,6 +27,9 @@ class PathAssessment:
     objective_length: float
     objective_weighted: float
     objective_rb: float
+    risk_std: float = 0.0
+    cvar_risk: float = 0.0
+    chance_violation_prob: float = 0.0
     headland_cost: float = 0.0
     hotspot_cost: float = 0.0
     pass_count_cost: float = 0.0
@@ -42,6 +45,10 @@ class PathAssessment:
     @property
     def angle_deg(self) -> float:
         return self.candidate.angle_deg
+
+    @property
+    def bound_risk(self) -> float:
+        return self.cvar_risk if self.cvar_risk > 0.0 else self.mean_risk
 
 
 @dataclass(frozen=True)
@@ -146,6 +153,7 @@ def assess_candidate(
 
     visit_count = np.zeros((grid.ny, grid.nx), dtype=int)
     static_samples: list[float] = []
+    uncertainty_samples: list[float] = []
     static_weights: list[float] = []
     compaction = 0.0
     headland_cost = 0.0
@@ -161,15 +169,17 @@ def assess_candidate(
         xs = np.linspace(x0, x1, n)
         ys = np.linspace(y0, y1, n)
         base_r = risk.sample_many(xs, ys, grid) * physics
+        std_r = risk.sample_uncertainty_many(xs, ys, grid) * physics
         head_r = risk.sample_layer_many(risk.headland_layer, xs, ys, grid) * physics
         hot_r = risk.sample_layer_many(risk.hotspot_layer, xs, ys, grid) * physics
         pass_r = risk.sample_layer_many(risk.pass_count_layer, xs, ys, grid) * physics
 
         for i in range(len(xs)):
             static_samples.append(float(min(1.0, base_r[i])))
+            uncertainty_samples.append(float(max(0.0, std_r[i])))
             static_weights.append(seg_len / n)
 
-        dynamic_r = base_r.copy()
+        dynamic_r = np.minimum(1.0, base_r + risk_cfg.uncertainty_cost_weight * std_r)
         for i in range(len(xs)):
             ix, iy = grid.world_to_index(float(xs[i]), float(ys[i]))
             repeat_factor = 1.0 + risk_cfg.repeat_penalty * visit_count[iy, ix]
@@ -192,11 +202,23 @@ def assess_candidate(
     if static_samples:
         weights_arr = np.array(static_weights, dtype=float)
         samples_arr = np.array(static_samples, dtype=float)
+        uncertainty_arr = np.array(uncertainty_samples, dtype=float)
         mean_risk = float(np.average(samples_arr, weights=weights_arr))
         max_risk = float(samples_arr.max())
+        risk_std = float(np.sqrt(np.average(uncertainty_arr**2, weights=weights_arr)))
+        cvar_risk = float(mean_risk + risk_cfg.cvar_z * risk_std)
+        chance_violation_prob = _average_chance_exceedance(
+            samples_arr,
+            uncertainty_arr,
+            weights_arr,
+            risk_cfg.chance_threshold,
+        )
     else:
         mean_risk = 0.0
         max_risk = 0.0
+        risk_std = 0.0
+        cvar_risk = 0.0
+        chance_violation_prob = 0.0
 
     tool_radius = planner_cfg.swath_width_m / 2.0
     coverage = compute_coverage_rate(candidate.waypoints, grid, tool_radius)
@@ -207,6 +229,9 @@ def assess_candidate(
         compaction_cost=compaction,
         mean_risk=mean_risk,
         max_risk=max_risk,
+        risk_std=risk_std,
+        cvar_risk=cvar_risk,
+        chance_violation_prob=chance_violation_prob,
         coverage_rate=coverage,
         num_turns=num_turns,
         objective_length=L,
@@ -224,6 +249,22 @@ def assess_candidate(
         moisture_factor=physics_factors.moisture_factor if physics_factors else 1.0,
         physics_factor=physics,
     )
+
+
+def _average_chance_exceedance(
+    means: np.ndarray,
+    stds: np.ndarray,
+    weights: np.ndarray,
+    threshold: float,
+) -> float:
+    """Approximate path-averaged P(R(x) > threshold) under Gaussian risk cells."""
+    if means.size == 0:
+        return 0.0
+    stds = np.maximum(stds, 1e-6)
+    z = (threshold - means) / stds
+    # Logistic approximation to the normal survival function; avoids scipy.
+    probs = 1.0 / (1.0 + np.exp(1.702 * z))
+    return float(np.average(probs, weights=weights))
 
 
 def assess_all_candidates(
@@ -300,14 +341,14 @@ def build_feasibility_certificate(
             boundary_complexity=float(grid.geometry.outer.length / max(grid.geometry.area_m2, 1.0)),
         )
 
-    min_risk = min(a.mean_risk for a in pool)
+    min_risk = min(a.bound_risk for a in pool)
     return FeasibilityCertificate(
         field_name=field_name,
         delta=delta,
         num_full_candidates=len(full_assessments),
         num_nr_candidates=len(nr_assessments),
         best_coverage=max(a.coverage_rate for a in pool),
-        min_mean_risk=min_risk,
+        min_mean_risk=min(a.mean_risk for a in pool),
         min_violation=max(0.0, min_risk - delta),
         field_area_m2=grid.geometry.area_m2,
         aspect_ratio=grid.geometry.aspect_ratio,

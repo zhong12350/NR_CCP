@@ -43,6 +43,15 @@ class RiskFieldConfig:
     turning_penalty: float = 0.25
     turning_angle_deg: float = 45.0
     normalize: bool = True
+    uncertainty_enabled: bool = True
+    uncertainty_base: float = 0.03
+    headland_uncertainty: float = 0.10
+    hotspot_uncertainty: float = 0.08
+    pass_count_uncertainty: float = 0.06
+    uncertainty_cost_weight: float = 0.50
+    cvar_z: float = 1.645
+    chance_threshold: float = 0.60
+    risk_bound_metric: str = "cvar"
 
 
 @dataclass
@@ -189,6 +198,15 @@ def load_config(path: str | Path) -> AppConfig:
             turning_penalty=float(risk_raw.get("turning_penalty", 0.25)),
             turning_angle_deg=float(risk_raw.get("turning_angle_deg", 45.0)),
             normalize=bool(risk_raw.get("normalize", True)),
+            uncertainty_enabled=bool(risk_raw.get("uncertainty_enabled", True)),
+            uncertainty_base=float(risk_raw.get("uncertainty_base", 0.03)),
+            headland_uncertainty=float(risk_raw.get("headland_uncertainty", 0.10)),
+            hotspot_uncertainty=float(risk_raw.get("hotspot_uncertainty", 0.08)),
+            pass_count_uncertainty=float(risk_raw.get("pass_count_uncertainty", 0.06)),
+            uncertainty_cost_weight=float(risk_raw.get("uncertainty_cost_weight", 0.50)),
+            cvar_z=float(risk_raw.get("cvar_z", 1.645)),
+            chance_threshold=float(risk_raw.get("chance_threshold", 0.60)),
+            risk_bound_metric=str(risk_raw.get("risk_bound_metric", "cvar")),
         ),
         planner=PlannerConfig(
             swath_width_m=float(planner_raw.get("swath_width_m", 6.0)),

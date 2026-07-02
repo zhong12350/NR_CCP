@@ -43,20 +43,20 @@ def select_rb_ccp(
     delta: float,
     beta_rb: float,
 ) -> SelectionResult:
-    feasible = [a for a in assessments if a.mean_risk <= delta + 1e-9]
+    feasible = [a for a in assessments if a.bound_risk <= delta + 1e-9]
     if feasible:
         best = min(feasible, key=lambda a: a.path_length_m + beta_rb * a.compaction_cost)
         return SelectionResult("rb_ccp", best, False, 0.0, "full")
 
     def fallback_key(a: PathAssessment) -> tuple[float, float]:
-        return (max(0.0, a.mean_risk - delta), a.path_length_m + beta_rb * a.compaction_cost)
+        return (max(0.0, a.bound_risk - delta), a.path_length_m + beta_rb * a.compaction_cost)
 
     best = min(assessments, key=fallback_key)
     return SelectionResult(
         "rb_ccp",
         best,
         True,
-        max(0.0, best.mean_risk - delta),
+        max(0.0, best.bound_risk - delta),
         "full",
     )
 
@@ -76,14 +76,14 @@ def select_nr_ccp(
     if not assessments:
         raise RuntimeError("NR-CCP informed pool is empty.")
 
-    feasible = [a for a in assessments if a.mean_risk <= delta + 1e-9]
+    feasible = [a for a in assessments if a.bound_risk <= delta + 1e-9]
     if feasible:
         best = min(feasible, key=lambda a: a.path_length_m + beta_nr * a.compaction_cost)
         return SelectionResult("nr_ccp", best, False, 0.0, "informed")
 
     def fallback_key(a: PathAssessment) -> tuple[float, float]:
         return (
-            max(0.0, a.mean_risk - delta),
+            max(0.0, a.bound_risk - delta),
             a.path_length_m + beta_nr * a.compaction_cost,
         )
 
@@ -92,7 +92,7 @@ def select_nr_ccp(
         "nr_ccp",
         best,
         True,
-        max(0.0, best.mean_risk - delta),
+        max(0.0, best.bound_risk - delta),
         "informed",
     )
 
