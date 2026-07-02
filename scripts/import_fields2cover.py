@@ -37,7 +37,11 @@ def import_fields2cover(config: AppConfig, project_root: Path) -> int:
 
     for i, wkt in enumerate(wkt_files, start=1):
         name = Path(wkt).stem
-        if name in existing and existing[name].source == "official_csv":
+        if name in existing and existing[name].source in (
+            "official_csv",
+            "fields2cover_official",
+            "fields2cover_cli",
+        ):
             rec = existing[name]
             rows.append(
                 {

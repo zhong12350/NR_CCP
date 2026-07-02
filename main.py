@@ -252,14 +252,17 @@ def main(argv: list[str] | None = None) -> int:
             "budget_experiment",
             "physics_sensitivity",
             "simulate",
+            "mujoco",
         ):
             mode = argv[0]
             argv = argv[1:]
-        elif argv[0].endswith(".yaml"):
+        if argv and argv[0].endswith(".yaml"):
             config_path = Path(argv[0])
             if not config_path.is_absolute():
                 config_path = root / config_path
-            argv = argv[1:]
+            # simulate/mujoco parse config from their own argv; do not consume it here.
+            if mode not in ("simulate", "mujoco"):
+                argv = argv[1:]
 
     print(f"NR-CCP | mode={mode} | config: {config_path}")
     config = load_config(config_path)
@@ -309,6 +312,10 @@ def main(argv: list[str] | None = None) -> int:
         from scripts.run_simulation import main as run_simulation_main
 
         return run_simulation_main(argv)
+    elif mode == "mujoco":
+        from scripts.run_mujoco_viz import main as run_mujoco_main
+
+        return run_mujoco_main(argv)
     else:
         wkt = Path(argv[0]) if argv else None
         run_single_field(config, root, wkt_path=wkt)

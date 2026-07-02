@@ -1,0 +1,29 @@
+<!-- Simplified agricultural vehicle for kinematic replay (mocap-driven). -->
+<mujoco model="nr_ccp_tractor">
+  <worldbody>
+    <body name="tractor" mocap="true" pos="0 0 0.55">
+      <!-- chassis: half-size box (MuJoCo size = half-extent) -->
+      <geom name="chassis" type="box" size="1.75 1.0 0.5" rgba="0.20 0.45 0.85 1"/>
+      <!-- swath footprint (non-colliding visual only) -->
+      <geom
+        name="swath"
+        type="box"
+        pos="0 0 -0.52"
+        size="1.75 3.0 0.02"
+        rgba="0.10 0.80 0.20 0.30"
+        contype="0"
+        conaffinity="0"
+      />
+      <!-- heading arrow -->
+      <geom
+        name="heading"
+        type="capsule"
+        fromto="0.5 0 0  2.0 0 0"
+        size="0.08"
+        rgba="1 0.9 0.2 1"
+        contype="0"
+        conaffinity="0"
+      />
+    </body>
+  </worldbody>
+</mujoco>
