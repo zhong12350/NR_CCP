@@ -26,6 +26,8 @@ planner:
   angle_step_deg: 5.0
   min_coverage: 0.80
   waypoint_spacing_m: 2.0
+  route_optimizer: 2opt
+  route_2opt_passes: 3
 
 selection:
   delta: 0.38

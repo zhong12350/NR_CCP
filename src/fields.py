@@ -72,7 +72,7 @@ def estimate_pass_count(grid: FieldGrid, angle_deg: float, swath_width_m: float)
         for i in range(len(swath.coords) - 1):
             x0, y0 = swath.coords[i]
             x1, y1 = swath.coords[i + 1]
-            seg_len = abs(x1 - x0) + abs(y1 - y0)
+            seg_len = float(np.hypot(x1 - x0, y1 - y0))
             n = max(2, int(seg_len / grid.cell_size_m) + 1)
             xs = np.linspace(x0, x1, n)
             ys = np.linspace(y0, y1, n)

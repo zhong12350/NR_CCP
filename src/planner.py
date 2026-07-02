@@ -18,8 +18,8 @@ from src.fields import RiskField, build_risk_field
 from src.fields2cover_baseline import load_official_records, resolve_fields2cover_assessment
 from src.geometry import FieldGrid, load_field_from_wkt
 from src.physics import compute_physics_factors
-from src.risk_search import build_candidate_pools
-from src.selectors import SelectionResult, select_all, select_rb_ccp
+from src.risk_search import generate_informed_candidates
+from src.selectors import SelectionResult, select_all
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,6 @@ def plan_field(
     risk = build_risk_field(grid, config.risk_field, config.planner)
     physics_factors = compute_physics_factors(config.vehicle, config.soil, config.physics)
 
-    full_cands = enumerate_candidates(grid, config.planner)
     assess_kwargs = dict(
         grid=grid,
         risk=risk,
@@ -73,24 +72,19 @@ def plan_field(
         physics_factors=physics_factors,
     )
 
+    # Full-enumeration pipeline (baselines + RB-CCP): generation + assessment.
     t0 = time.perf_counter()
+    full_cands = enumerate_candidates(grid, config.planner)
     full_assess = assess_all_candidates(full_cands, **assess_kwargs)
     runtime_full = time.perf_counter() - t0
 
-    rb_sel = (
-        select_rb_ccp(full_assess, config.selection.delta, config.selection.beta_rb_ccp)
-        if full_assess
-        else None
-    )
-
+    # NR-CCP pipeline: informed candidate generation + assessment, timed as an
+    # independent standalone run (it must not reuse full-pool assessments).
     t1 = time.perf_counter()
-    _, informed_cands, informed_assess = build_candidate_pools(
-        grid,
-        risk,
-        config,
-        full_assessments=full_assess,
-        rb_ccp_assessment=rb_sel.assessment if rb_sel else None,
+    informed_cands = generate_informed_candidates(
+        grid, risk, config.planner, config.informed_sampling, seed=config.seed
     )
+    informed_assess = assess_all_candidates(informed_cands, **assess_kwargs)
     runtime_nr = time.perf_counter() - t1
 
     selections = select_all(

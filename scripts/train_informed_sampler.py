@@ -13,12 +13,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.assessor import assess_all_candidates
+from src.candidates import enumerate_candidates
 from src.config_loader import AppConfig, load_config
 from src.fields import build_risk_field
 from src.geometry import load_field_from_wkt
 from src.informed_sampling import InformedAngleSampler, default_model, save_model
 from src.physics import compute_physics_factors
-from src.risk_search import build_candidate_pools
 
 
 def _feature_vector(sampler: InformedAngleSampler, grid, risk, angle: float, swath_w: float) -> np.ndarray:
@@ -57,7 +57,7 @@ def train_sampler(config: AppConfig, project_root: Path) -> int:
                     auto_cell_size=config.field.auto_cell_size,
                 )
                 risk = build_risk_field(grid, config.risk_field, config.planner)
-                full, _ = build_candidate_pools(grid, risk, config)
+                full = enumerate_candidates(grid, config.planner)
                 assess = assess_all_candidates(
                     full,
                     grid,

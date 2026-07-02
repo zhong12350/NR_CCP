@@ -51,6 +51,9 @@ class PlannerConfig:
     angle_step_deg: float = 5.0
     min_coverage: float = 0.90
     waypoint_spacing_m: float = 2.0
+    # Route-order optimization over swath segments: "serpentine" or "2opt".
+    route_optimizer: str = "2opt"
+    route_2opt_passes: int = 3
 
 
 @dataclass
@@ -192,6 +195,8 @@ def load_config(path: str | Path) -> AppConfig:
             angle_step_deg=float(planner_raw.get("angle_step_deg", 5.0)),
             min_coverage=float(planner_raw.get("min_coverage", 0.90)),
             waypoint_spacing_m=float(planner_raw.get("waypoint_spacing_m", 2.0)),
+            route_optimizer=str(planner_raw.get("route_optimizer", "2opt")),
+            route_2opt_passes=int(planner_raw.get("route_2opt_passes", 3)),
         ),
         selection=SelectionConfig(
             delta=float(selection_raw.get("delta", 0.38)),

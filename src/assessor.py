@@ -61,11 +61,12 @@ class FeasibilityCertificate:
 
 
 def path_length(waypoints: list[tuple[float, float]]) -> float:
+    """Euclidean route length."""
     if len(waypoints) < 2:
         return 0.0
     total = 0.0
     for (x0, y0), (x1, y1) in zip(waypoints[:-1], waypoints[1:]):
-        total += abs(x1 - x0) + abs(y1 - y0)
+        total += float(np.hypot(x1 - x0, y1 - y0))
     return total
 
 
@@ -77,7 +78,7 @@ def _densify_waypoints(
         return waypoints
     dense: list[tuple[float, float]] = [waypoints[0]]
     for (x0, y0), (x1, y1) in zip(waypoints[:-1], waypoints[1:]):
-        seg_len = abs(x1 - x0) + abs(y1 - y0)
+        seg_len = float(np.hypot(x1 - x0, y1 - y0))
         n = max(1, int(np.ceil(seg_len / max(spacing_m, 0.5))))
         for i in range(1, n + 1):
             t = i / n
@@ -86,18 +87,23 @@ def _densify_waypoints(
 
 
 def _count_turns(waypoints: list[tuple[float, float]], angle_threshold_deg: float) -> int:
+    """Count heading changes exceeding the threshold angle."""
     if len(waypoints) < 3:
         return 0
+    threshold_rad = np.deg2rad(max(angle_threshold_deg, 1.0))
     turns = 0
-    prev_dir: tuple[float, float] | None = None
+    prev_heading: float | None = None
     for (x0, y0), (x1, y1) in zip(waypoints[:-1], waypoints[1:]):
         dx, dy = x1 - x0, y1 - y0
-        if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+        if np.hypot(dx, dy) < 1e-9:
             continue
-        direction = (np.sign(dx), np.sign(dy))
-        if prev_dir is not None and direction != prev_dir:
-            turns += 1
-        prev_dir = direction
+        heading = float(np.arctan2(dy, dx))
+        if prev_heading is not None:
+            diff = abs(heading - prev_heading)
+            diff = min(diff, 2.0 * np.pi - diff)
+            if diff > threshold_rad:
+                turns += 1
+        prev_heading = heading
     return turns
 
 
@@ -106,21 +112,21 @@ def compute_coverage_rate(
     grid: FieldGrid,
     tool_radius_m: float,
 ) -> float:
-    if not waypoints:
+    """Exact polygon coverage: swept tool area intersected with inner workable area."""
+    if len(waypoints) < 2:
+        return 0.0
+    inner = grid.geometry.inner
+    if inner.is_empty or inner.area <= 0.0:
         return 0.0
 
-    visited = np.zeros((grid.ny, grid.nx), dtype=bool)
-    yy, xx = np.meshgrid(grid.y_coords, grid.x_coords, indexing="ij")
-    radius_sq = tool_radius_m**2
+    from shapely.geometry import LineString
 
-    for x, y in waypoints:
-        dist_sq = (xx - x) ** 2 + (yy - y) ** 2
-        visited |= dist_sq <= radius_sq
-
-    inner = grid.inner_mask
-    if not np.any(inner):
+    route = LineString(waypoints)
+    if route.length < 1e-9:
         return 0.0
-    return float(visited[inner].mean())
+    swept = route.buffer(tool_radius_m)
+    covered = swept.intersection(inner).area
+    return float(covered / inner.area)
 
 
 def assess_candidate(
@@ -148,7 +154,7 @@ def assess_candidate(
     repeat_cost = 0.0
 
     for (x0, y0), (x1, y1) in zip(waypoints[:-1], waypoints[1:]):
-        seg_len = abs(x1 - x0) + abs(y1 - y0)
+        seg_len = float(np.hypot(x1 - x0, y1 - y0))
         if seg_len < 1e-9:
             continue
         n = max(2, int(np.ceil(seg_len / 1.0)) + 1)
@@ -247,16 +253,29 @@ def assess_all_candidates(
         )
         for cand in candidates
     ]
-    best_cov = max(a.coverage_rate for a in all_assessed)
-    threshold = min_coverage
-    if best_cov < min_coverage - 1e-6:
-        threshold = max(0.75, best_cov - 0.02)
+    return filter_by_coverage(all_assessed, min_coverage)
 
-    filtered = [a for a in all_assessed if a.coverage_rate >= threshold - 1e-6]
-    if not filtered:
-        best_cov = max(a.coverage_rate for a in all_assessed)
-        filtered = [a for a in all_assessed if a.coverage_rate >= best_cov - 1e-6]
-    return filtered
+
+def filter_by_coverage(
+    assessments: list[PathAssessment],
+    min_coverage: float,
+) -> list[PathAssessment]:
+    """
+    Strict coverage constraint: keep candidates with coverage >= min_coverage.
+
+    If no candidate satisfies the constraint, the field is coverage-infeasible
+    at this configuration; return only the best-coverage candidates so that
+    downstream selection still produces a plan, and let the recorded
+    coverage_rate (< min_coverage) expose the violation. The threshold is
+    never silently relaxed.
+    """
+    if not assessments:
+        return []
+    feasible = [a for a in assessments if a.coverage_rate >= min_coverage - 1e-9]
+    if feasible:
+        return feasible
+    best_cov = max(a.coverage_rate for a in assessments)
+    return [a for a in assessments if a.coverage_rate >= best_cov - 1e-6]
 
 
 def build_feasibility_certificate(
