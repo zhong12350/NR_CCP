@@ -27,6 +27,9 @@ class PathAssessment:
     objective_length: float
     objective_weighted: float
     objective_rb: float
+    risk_std: float = 0.0
+    cvar_risk: float = 0.0
+    chance_violation_prob: float = 0.0
     headland_cost: float = 0.0
     hotspot_cost: float = 0.0
     pass_count_cost: float = 0.0
@@ -42,6 +45,10 @@ class PathAssessment:
     @property
     def angle_deg(self) -> float:
         return self.candidate.angle_deg
+
+    @property
+    def bound_risk(self) -> float:
+        return self.cvar_risk if self.cvar_risk > 0.0 else self.mean_risk
 
 
 @dataclass(frozen=True)
@@ -61,11 +68,12 @@ class FeasibilityCertificate:
 
 
 def path_length(waypoints: list[tuple[float, float]]) -> float:
+    """Euclidean route length."""
     if len(waypoints) < 2:
         return 0.0
     total = 0.0
     for (x0, y0), (x1, y1) in zip(waypoints[:-1], waypoints[1:]):
-        total += abs(x1 - x0) + abs(y1 - y0)
+        total += float(np.hypot(x1 - x0, y1 - y0))
     return total
 
 
@@ -77,7 +85,7 @@ def _densify_waypoints(
         return waypoints
     dense: list[tuple[float, float]] = [waypoints[0]]
     for (x0, y0), (x1, y1) in zip(waypoints[:-1], waypoints[1:]):
-        seg_len = abs(x1 - x0) + abs(y1 - y0)
+        seg_len = float(np.hypot(x1 - x0, y1 - y0))
         n = max(1, int(np.ceil(seg_len / max(spacing_m, 0.5))))
         for i in range(1, n + 1):
             t = i / n
@@ -86,18 +94,23 @@ def _densify_waypoints(
 
 
 def _count_turns(waypoints: list[tuple[float, float]], angle_threshold_deg: float) -> int:
+    """Count heading changes exceeding the threshold angle."""
     if len(waypoints) < 3:
         return 0
+    threshold_rad = np.deg2rad(max(angle_threshold_deg, 1.0))
     turns = 0
-    prev_dir: tuple[float, float] | None = None
+    prev_heading: float | None = None
     for (x0, y0), (x1, y1) in zip(waypoints[:-1], waypoints[1:]):
         dx, dy = x1 - x0, y1 - y0
-        if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+        if np.hypot(dx, dy) < 1e-9:
             continue
-        direction = (np.sign(dx), np.sign(dy))
-        if prev_dir is not None and direction != prev_dir:
-            turns += 1
-        prev_dir = direction
+        heading = float(np.arctan2(dy, dx))
+        if prev_heading is not None:
+            diff = abs(heading - prev_heading)
+            diff = min(diff, 2.0 * np.pi - diff)
+            if diff > threshold_rad:
+                turns += 1
+        prev_heading = heading
     return turns
 
 
@@ -106,21 +119,21 @@ def compute_coverage_rate(
     grid: FieldGrid,
     tool_radius_m: float,
 ) -> float:
-    if not waypoints:
+    """Exact polygon coverage: swept tool area intersected with inner workable area."""
+    if len(waypoints) < 2:
+        return 0.0
+    inner = grid.geometry.inner
+    if inner.is_empty or inner.area <= 0.0:
         return 0.0
 
-    visited = np.zeros((grid.ny, grid.nx), dtype=bool)
-    yy, xx = np.meshgrid(grid.y_coords, grid.x_coords, indexing="ij")
-    radius_sq = tool_radius_m**2
+    from shapely.geometry import LineString
 
-    for x, y in waypoints:
-        dist_sq = (xx - x) ** 2 + (yy - y) ** 2
-        visited |= dist_sq <= radius_sq
-
-    inner = grid.inner_mask
-    if not np.any(inner):
+    route = LineString(waypoints)
+    if route.length < 1e-9:
         return 0.0
-    return float(visited[inner].mean())
+    swept = route.buffer(tool_radius_m)
+    covered = swept.intersection(inner).area
+    return float(covered / inner.area)
 
 
 def assess_candidate(
@@ -140,6 +153,7 @@ def assess_candidate(
 
     visit_count = np.zeros((grid.ny, grid.nx), dtype=int)
     static_samples: list[float] = []
+    uncertainty_samples: list[float] = []
     static_weights: list[float] = []
     compaction = 0.0
     headland_cost = 0.0
@@ -148,22 +162,24 @@ def assess_candidate(
     repeat_cost = 0.0
 
     for (x0, y0), (x1, y1) in zip(waypoints[:-1], waypoints[1:]):
-        seg_len = abs(x1 - x0) + abs(y1 - y0)
+        seg_len = float(np.hypot(x1 - x0, y1 - y0))
         if seg_len < 1e-9:
             continue
         n = max(2, int(np.ceil(seg_len / 1.0)) + 1)
         xs = np.linspace(x0, x1, n)
         ys = np.linspace(y0, y1, n)
         base_r = risk.sample_many(xs, ys, grid) * physics
+        std_r = risk.sample_uncertainty_many(xs, ys, grid) * physics
         head_r = risk.sample_layer_many(risk.headland_layer, xs, ys, grid) * physics
         hot_r = risk.sample_layer_many(risk.hotspot_layer, xs, ys, grid) * physics
         pass_r = risk.sample_layer_many(risk.pass_count_layer, xs, ys, grid) * physics
 
         for i in range(len(xs)):
             static_samples.append(float(min(1.0, base_r[i])))
+            uncertainty_samples.append(float(max(0.0, std_r[i])))
             static_weights.append(seg_len / n)
 
-        dynamic_r = base_r.copy()
+        dynamic_r = np.minimum(1.0, base_r + risk_cfg.uncertainty_cost_weight * std_r)
         for i in range(len(xs)):
             ix, iy = grid.world_to_index(float(xs[i]), float(ys[i]))
             repeat_factor = 1.0 + risk_cfg.repeat_penalty * visit_count[iy, ix]
@@ -186,11 +202,23 @@ def assess_candidate(
     if static_samples:
         weights_arr = np.array(static_weights, dtype=float)
         samples_arr = np.array(static_samples, dtype=float)
+        uncertainty_arr = np.array(uncertainty_samples, dtype=float)
         mean_risk = float(np.average(samples_arr, weights=weights_arr))
         max_risk = float(samples_arr.max())
+        risk_std = float(np.sqrt(np.average(uncertainty_arr**2, weights=weights_arr)))
+        cvar_risk = float(mean_risk + risk_cfg.cvar_z * risk_std)
+        chance_violation_prob = _average_chance_exceedance(
+            samples_arr,
+            uncertainty_arr,
+            weights_arr,
+            risk_cfg.chance_threshold,
+        )
     else:
         mean_risk = 0.0
         max_risk = 0.0
+        risk_std = 0.0
+        cvar_risk = 0.0
+        chance_violation_prob = 0.0
 
     tool_radius = planner_cfg.swath_width_m / 2.0
     coverage = compute_coverage_rate(candidate.waypoints, grid, tool_radius)
@@ -201,6 +229,9 @@ def assess_candidate(
         compaction_cost=compaction,
         mean_risk=mean_risk,
         max_risk=max_risk,
+        risk_std=risk_std,
+        cvar_risk=cvar_risk,
+        chance_violation_prob=chance_violation_prob,
         coverage_rate=coverage,
         num_turns=num_turns,
         objective_length=L,
@@ -218,6 +249,22 @@ def assess_candidate(
         moisture_factor=physics_factors.moisture_factor if physics_factors else 1.0,
         physics_factor=physics,
     )
+
+
+def _average_chance_exceedance(
+    means: np.ndarray,
+    stds: np.ndarray,
+    weights: np.ndarray,
+    threshold: float,
+) -> float:
+    """Approximate path-averaged P(R(x) > threshold) under Gaussian risk cells."""
+    if means.size == 0:
+        return 0.0
+    stds = np.maximum(stds, 1e-6)
+    z = (threshold - means) / stds
+    # Logistic approximation to the normal survival function; avoids scipy.
+    probs = 1.0 / (1.0 + np.exp(1.702 * z))
+    return float(np.average(probs, weights=weights))
 
 
 def assess_all_candidates(
@@ -247,16 +294,29 @@ def assess_all_candidates(
         )
         for cand in candidates
     ]
-    best_cov = max(a.coverage_rate for a in all_assessed)
-    threshold = min_coverage
-    if best_cov < min_coverage - 1e-6:
-        threshold = max(0.75, best_cov - 0.02)
+    return filter_by_coverage(all_assessed, min_coverage)
 
-    filtered = [a for a in all_assessed if a.coverage_rate >= threshold - 1e-6]
-    if not filtered:
-        best_cov = max(a.coverage_rate for a in all_assessed)
-        filtered = [a for a in all_assessed if a.coverage_rate >= best_cov - 1e-6]
-    return filtered
+
+def filter_by_coverage(
+    assessments: list[PathAssessment],
+    min_coverage: float,
+) -> list[PathAssessment]:
+    """
+    Strict coverage constraint: keep candidates with coverage >= min_coverage.
+
+    If no candidate satisfies the constraint, the field is coverage-infeasible
+    at this configuration; return only the best-coverage candidates so that
+    downstream selection still produces a plan, and let the recorded
+    coverage_rate (< min_coverage) expose the violation. The threshold is
+    never silently relaxed.
+    """
+    if not assessments:
+        return []
+    feasible = [a for a in assessments if a.coverage_rate >= min_coverage - 1e-9]
+    if feasible:
+        return feasible
+    best_cov = max(a.coverage_rate for a in assessments)
+    return [a for a in assessments if a.coverage_rate >= best_cov - 1e-6]
 
 
 def build_feasibility_certificate(
@@ -281,14 +341,14 @@ def build_feasibility_certificate(
             boundary_complexity=float(grid.geometry.outer.length / max(grid.geometry.area_m2, 1.0)),
         )
 
-    min_risk = min(a.mean_risk for a in pool)
+    min_risk = min(a.bound_risk for a in pool)
     return FeasibilityCertificate(
         field_name=field_name,
         delta=delta,
         num_full_candidates=len(full_assessments),
         num_nr_candidates=len(nr_assessments),
         best_coverage=max(a.coverage_rate for a in pool),
-        min_mean_risk=min_risk,
+        min_mean_risk=min(a.mean_risk for a in pool),
         min_violation=max(0.0, min_risk - delta),
         field_area_m2=grid.geometry.area_m2,
         aspect_ratio=grid.geometry.aspect_ratio,

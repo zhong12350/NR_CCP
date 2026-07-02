@@ -17,6 +17,10 @@ class MethodMetrics:
     compaction_cost: float
     mean_risk: float
     max_risk: float
+    risk_std: float
+    cvar_risk: float
+    chance_violation_prob: float
+    bound_risk: float
     coverage_rate: float
     num_turns: int
     num_candidates: int
@@ -63,8 +67,8 @@ def metrics_from_selection(
         fallback = selection.fallback
         violation = selection.violation
     else:
-        fallback = a.mean_risk > delta + 1e-9
-        violation = max(0.0, a.mean_risk - delta)
+        fallback = a.bound_risk > delta + 1e-9
+        violation = max(0.0, a.bound_risk - delta)
 
     cert = certificate
     return MethodMetrics(
@@ -75,6 +79,10 @@ def metrics_from_selection(
         compaction_cost=a.compaction_cost,
         mean_risk=a.mean_risk,
         max_risk=a.max_risk,
+        risk_std=a.risk_std,
+        cvar_risk=a.cvar_risk,
+        chance_violation_prob=a.chance_violation_prob,
+        bound_risk=a.bound_risk,
         coverage_rate=a.coverage_rate,
         num_turns=a.num_turns,
         num_candidates=num_candidates,

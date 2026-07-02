@@ -43,20 +43,20 @@ def select_rb_ccp(
     delta: float,
     beta_rb: float,
 ) -> SelectionResult:
-    feasible = [a for a in assessments if a.mean_risk <= delta + 1e-9]
+    feasible = [a for a in assessments if a.bound_risk <= delta + 1e-9]
     if feasible:
         best = min(feasible, key=lambda a: a.path_length_m + beta_rb * a.compaction_cost)
         return SelectionResult("rb_ccp", best, False, 0.0, "full")
 
     def fallback_key(a: PathAssessment) -> tuple[float, float]:
-        return (max(0.0, a.mean_risk - delta), a.path_length_m + beta_rb * a.compaction_cost)
+        return (max(0.0, a.bound_risk - delta), a.path_length_m + beta_rb * a.compaction_cost)
 
     best = min(assessments, key=fallback_key)
     return SelectionResult(
         "rb_ccp",
         best,
         True,
-        max(0.0, best.mean_risk - delta),
+        max(0.0, best.bound_risk - delta),
         "full",
     )
 
@@ -65,53 +65,36 @@ def select_nr_ccp(
     assessments: list[PathAssessment],
     delta: float,
     beta_nr: float,
-    rb_ccp_result: SelectionResult | None = None,
 ) -> SelectionResult:
-    """NR-CCP: RB-CCP rule on prior-guided pool; never worse than RB-CCP winner."""
+    """
+    NR-CCP: RB-CCP selection rule applied to the informed candidate pool.
+
+    The informed pool is generated and assessed independently of the full
+    enumeration pool; no guard copies the RB-CCP winner, so any quality gap
+    between NR-CCP and RB-CCP is reported as-is.
+    """
     if not assessments:
         raise RuntimeError("NR-CCP informed pool is empty.")
 
-    feasible = [a for a in assessments if a.mean_risk <= delta + 1e-9]
+    feasible = [a for a in assessments if a.bound_risk <= delta + 1e-9]
     if feasible:
         best = min(feasible, key=lambda a: a.path_length_m + beta_nr * a.compaction_cost)
-        result = SelectionResult("nr_ccp", best, False, 0.0, "informed")
-    else:
-        def fallback_key(a: PathAssessment) -> tuple[float, float, float]:
-            return (
-                max(0.0, a.mean_risk - delta),
-                a.compaction_cost,
-                a.path_length_m + beta_nr * a.compaction_cost,
-            )
+        return SelectionResult("nr_ccp", best, False, 0.0, "informed")
 
-        best = min(assessments, key=fallback_key)
-        result = SelectionResult(
-            "nr_ccp",
-            best,
-            True,
-            max(0.0, best.mean_risk - delta),
-            "informed",
+    def fallback_key(a: PathAssessment) -> tuple[float, float]:
+        return (
+            max(0.0, a.bound_risk - delta),
+            a.path_length_m + beta_nr * a.compaction_cost,
         )
 
-    if rb_ccp_result is None:
-        return result
-
-    rb = rb_ccp_result.assessment
-    nr = result.assessment
-
-    def rank(a: PathAssessment, fb: bool, viol: float) -> tuple[float, float, float]:
-        return (viol if fb else 0.0, a.mean_risk, a.path_length_m + beta_nr * a.compaction_cost)
-
-    rb_rank = rank(rb, rb_ccp_result.fallback, rb_ccp_result.violation)
-    nr_rank = rank(nr, result.fallback, result.violation)
-    if rb_rank < nr_rank:
-        return SelectionResult(
-            "nr_ccp",
-            rb,
-            rb_ccp_result.fallback,
-            rb_ccp_result.violation,
-            "informed+rb_guard",
-        )
-    return result
+    best = min(assessments, key=fallback_key)
+    return SelectionResult(
+        "nr_ccp",
+        best,
+        True,
+        max(0.0, best.bound_risk - delta),
+        "informed",
+    )
 
 
 SELECTOR_REGISTRY = {
@@ -144,14 +127,10 @@ def select_all(
         elif method == "fields2cover":
             results.append(select_fields2cover(full_assessments))
         elif method == "rb_ccp":
-            rb = select_rb_ccp(full_assessments, delta, beta_rb)
-            results.append(rb)
+            results.append(select_rb_ccp(full_assessments, delta, beta_rb))
         elif method == "nr_ccp":
             pool = informed_assessments or full_assessments
-            rb = next((r for r in results if r.method == "rb_ccp"), None)
-            if rb is None:
-                rb = select_rb_ccp(full_assessments, delta, beta_rb)
-            results.append(select_nr_ccp(pool, delta, beta_nr, rb_ccp_result=rb))
+            results.append(select_nr_ccp(pool, delta, beta_nr))
         else:
             raise ValueError(f"Unknown method '{method}'. Available: {list(SELECTOR_REGISTRY)}")
     return results

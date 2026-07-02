@@ -20,12 +20,23 @@ risk_field:
   turning_penalty: 0.25
   turning_angle_deg: 45.0
   normalize: true
+  uncertainty_enabled: true
+  uncertainty_base: 0.03
+  headland_uncertainty: 0.10
+  hotspot_uncertainty: 0.08
+  pass_count_uncertainty: 0.06
+  uncertainty_cost_weight: 0.50
+  cvar_z: 1.645
+  chance_threshold: 0.60
+  risk_bound_metric: cvar
 
 planner:
   swath_width_m: 6.0
   angle_step_deg: 5.0
   min_coverage: 0.80
   waypoint_spacing_m: 2.0
+  route_optimizer: 2opt
+  route_2opt_passes: 3
 
 selection:
   delta: 0.38

@@ -28,8 +28,9 @@ In one run, the project answers the practical planning question:
 ## Core Ideas
 
 - **Coverage first:** generate swath-based boustrophedon candidates over real 2D field polygons.
-- **Risk model:** combine headland exposure, synthetic hotspots, historical/pass-count effects, repeated traversal, turn penalties, and physics-informed compaction multipliers.
-- **Risk-bounded selection:** compare shortest-path, weighted-cost, RB-CCP, NR-CCP informed search, and Fields2Cover-like baselines under the same metrics.
+- **Uncertain risk model:** combine headland exposure, synthetic hotspots, historical/pass-count effects, repeated traversal, turn penalties, physics-informed compaction multipliers, and per-cell uncertainty.
+- **Risk-bounded selection:** compare shortest-path, weighted-cost, RB-CCP, NR-CCP informed search, and Fields2Cover-like baselines using a conservative CVaR-style risk bound.
+- **Neural informed sampling:** train a field-level validated MLP prior over field, uncertainty, and angle features to propose a smaller candidate pool.
 - **Reproducible outputs:** every run writes path figures, comparison plots, and per-method CSV rows for later analysis.
 
 ## Quick Start
@@ -110,6 +111,8 @@ The larger experiment setup lives in `configs/nr_ccp_full.yaml`. For a smaller d
 | `path_length_m` | Total route length. |
 | `compaction_cost` | Accumulated risk-weighted traversal cost. |
 | `mean_risk`, `max_risk` | Average and peak planning risk along the selected path. |
+| `risk_std`, `cvar_risk` | Path risk uncertainty and conservative bound used by RB/NR selection. |
+| `chance_violation_prob` | Approximate path-averaged probability of exceeding the configured risk threshold. |
 | `coverage_rate` | Fraction of workable area covered by the route. |
 | `fallback` | Whether the configured risk bound could not be satisfied. |
 | `violation` | How far the selected route exceeds the risk bound. |

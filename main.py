@@ -229,7 +229,7 @@ def _print_summary(
         print(
             f"  {m.method}{fb}: θ={m.angle_deg:.0f}°, "
             f"L={m.path_length_m:.0f}m, C={m.compaction_cost:.0f}, "
-            f"mean_risk={m.mean_risk:.3f}, cov={m.coverage_rate:.1%}"
+            f"mean={m.mean_risk:.3f}, cvar={m.cvar_risk:.3f}, cov={m.coverage_rate:.1%}"
         )
 
 
